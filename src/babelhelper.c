@@ -49,7 +49,6 @@ int babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
 	char *action = NULL;
 	char *address_str = NULL;
 	char *ifname = NULL;
-	struct babelneighbour ret;
 	int reach, cost, rxcost, txcost;
 	int n = sscanf(line, "%ms neighbour %*x address %ms if %ms "
 			"reach %x rxcost %d txcost %d cost %d",
@@ -58,30 +57,33 @@ int babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
 	if (n != 7)
 		goto free;
 
-	if (inet_pton(AF_INET6, address_str, &(ret.address)) != 1)
+	if (inet_pton(AF_INET6, address_str, &(dest->address)) != 1)
 	{
 		fprintf(stderr, "babeld-parser error: could not convert babel data to ipv6 address: %s\n", address_str);
 		goto free;
 	}
-	ret.action = action;
-	ret.address_str = address_str;
-	ret.ifname = ifname;
-	ret.reach = reach;
-	ret.rxcost = rxcost;
-	ret.txcost = txcost;
-	ret.cost = cost;
+	dest->action = action;
+	dest->address_str = address_str;
+	dest->ifname = ifname;
+	dest->reach = reach;
+	dest->rxcost = rxcost;
+	dest->txcost = txcost;
+	dest->cost = cost;
 
 	return 0;
 
 free:
-	babelhelper_babelneighbour_free(&ret);
+	free(action);
+	free(address_str);
+	free(ifname);
+
 	return 1;
 }
 
 void babelhelper_babelneighbour_free(struct babelneighbour *bn) {
-	free(bn->action);
-	free(bn->address_str);
-	free(bn->ifname);
+	if (bn->action) free(bn->action);
+	if (bn->address_str) free(bn->address_str);
+	if (bn->ifname) free(bn->ifname);
 }
 
 void babelhelper_babelroute_free(struct babelroute *br) {
@@ -209,8 +211,10 @@ int babelhelper_babel_connect(int port) {
 		return -1;
 	}
 	if (connect(sockfd, (const struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0) {
-		perror("Can not connect to babeld");
-		return -1;
+		if (errno != EINPROGRESS) {
+			perror("Can not connect to babeld");
+			return -1;
+		}
 	}
 	return sockfd;
 }
