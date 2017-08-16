@@ -76,7 +76,6 @@ free:
 	free(action);
 	free(address_str);
 	free(ifname);
-
 	return 1;
 }
 
@@ -138,58 +137,19 @@ free:
 	return 1;
 }
 
-int readchunk(int fd, char *target) {
-	ssize_t len = 0;
+void input_pump(int fd,  void* obj, int blocking_read, void (*lineprocessor)(char* line, void* json_object)) {
+	FILE *ffd = fdopen(fd, "r");
+	char *line = NULL;
+	size_t len = 0;
+	int read;
 
-	while (len <=0) {
-		len = read(fd, (void*)target, CHUNKSIZE);
-		if (len == 0) {
-			// fprintf(stderr, "Connection closed.\n"); // this may or may not be an error => donot print a message
-			break;
-		}
-		else if (len < 0 && errno == EAGAIN) {
-			usleep(1000);
-		}
-		else if (len < 0) {
-			perror("Connection error while reading from babel socket.");
-			return -1;
-		}
+	while ((read = getline(&line, &len, ffd)) != -1) {
+		if (lineprocessor && line)
+			lineprocessor(line, obj);
 	}
 
-	target[len] = 0;
-	return len;
-}
-
-void input_pump(int fd, struct json_object* obj, void (*lineprocessor)(char*, struct json_object*)) {
-	char *inbuf;
-	char *stringp = inbuf;
-	const char *endstring = "ok";
-	size_t new_len, old_len = 0;
-	inbuf[0] = 0;
-
-	while  ( 1 ) {
-		old_len=strlen(inbuf);
-		new_len = old_len + CHUNKSIZE + 1;
-		inbuf = realloc(inbuf, new_len);
-		if ( readchunk(fd, &inbuf[old_len]) < 1 )
-			break;
-
-		//scan for newlines, have whole lines processed by lineprocessor
-		while ( strsep(&stringp, "\n") ) {
-			if (lineprocessor)
-				lineprocessor(inbuf, obj);
-
-			if ( !strncmp(inbuf, endstring, strlen(endstring) ) ) {
-				free(inbuf);
-				return;
-			}
-
-			size_t buffer_used  = strlen(stringp) +1;
-			memmove(inbuf, stringp, buffer_used);
-			inbuf = realloc(inbuf, buffer_used);
-		}
-
-	}
+	free(line);
+	fclose(ffd);
 }
 
 int babelhelper_babel_connect(int port) {
@@ -220,21 +180,20 @@ int babelhelper_babel_connect(int port) {
 }
 
 
-void readbabeldata(struct json_object *obj, void (*lineprocessor)(char*, struct json_object*))
+void readbabeldata(void *json_object, void (*lineprocessor)(char*, void* json_object))
 {
 	int sockfd = babelhelper_babel_connect(BABEL_PORT);
 
 	// receive and ignore babel header
-	input_pump(sockfd, NULL, NULL);
-	int i =  write(sockfd, "dump\n", 5);
-	if ( i < 5 ) {
+	input_pump(sockfd, NULL, 1,  NULL);
+	if (write(sockfd, "dump\n", 5) != 5) {
 		// TODO should we handle this?
 		fprintf(stderr, "could not complete write \"dump\" on the babel socket\n");
 	}
 
 	shutdown(sockfd, SHUT_WR);
 	// receive result
-	input_pump(sockfd, obj, lineprocessor);
+	input_pump(sockfd, json_object, 1, lineprocessor);
 
 	close(sockfd);
 	return;

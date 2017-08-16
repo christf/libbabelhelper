@@ -35,7 +35,6 @@
 #include <unistd.h>
 
 #define BABEL_PORT 33123
-#define CHUNKSIZE 255
 
 struct babelneighbour {
 	char *action;
@@ -69,3 +68,4 @@ void babelhelper_readbabeldata(struct json_object *obj, void (*lineprocessor)(ch
 char* babelhelper_generateip(const char *stringmac, const char *prefix);
 int babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6);
 int babelhelper_babel_connect(int port);
+void input_pump(int fd,  void *json_object, int blocking, void (*lineprocessor)(char*, void* json_object));
