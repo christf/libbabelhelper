@@ -137,7 +137,7 @@ free:
 	return 1;
 }
 
-void input_pump(int fd,  void* obj, int blocking_read, void (*lineprocessor)(char* line, void* json_object)) {
+void input_pump(int fd,  void* obj, int blocking_read, void (*lineprocessor)(char* line, void* object)) {
 	FILE *ffd = fdopen(fd, "r");
 	char *line = NULL;
 	size_t len = 0;
@@ -180,7 +180,7 @@ int babelhelper_babel_connect(int port) {
 }
 
 
-void readbabeldata(void *json_object, void (*lineprocessor)(char*, void* json_object))
+void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* object))
 {
 	int sockfd = babelhelper_babel_connect(BABEL_PORT);
 
@@ -193,7 +193,7 @@ void readbabeldata(void *json_object, void (*lineprocessor)(char*, void* json_ob
 
 	shutdown(sockfd, SHUT_WR);
 	// receive result
-	input_pump(sockfd, json_object, 1, lineprocessor);
+	input_pump(sockfd, object, 1, lineprocessor);
 
 	close(sockfd);
 	return;

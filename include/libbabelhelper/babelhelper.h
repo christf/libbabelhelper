@@ -31,7 +31,6 @@
 #include "errno.h"
 #include <arpa/inet.h>
 #include <stdlib.h>
-#include <json-c/json.h>
 #include <unistd.h>
 
 #define BABEL_PORT 33123
@@ -64,8 +63,8 @@ void babelhelper_babelroute_free(struct babelroute *br);
 void babelhelper_babelneighbour_free(struct babelneighbour *bn);
 int babelhelper_get_neighbour(struct babelneighbour *dest, char *line);
 int babelhelper_get_route(struct babelroute *dest, char *line);
-void babelhelper_readbabeldata(struct json_object *obj, void (*lineprocessor)(char*, struct json_object*));
+void babelhelper_readbabeldata(void* object, void (*lineprocessor)(char*, void* object));
 char* babelhelper_generateip(const char *stringmac, const char *prefix);
 int babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6);
 int babelhelper_babel_connect(int port);
-void input_pump(int fd,  void *json_object, int blocking, void (*lineprocessor)(char*, void* json_object));
+void input_pump(int fd,  void *object, int blocking, void (*lineprocessor)(char*, void* object));
