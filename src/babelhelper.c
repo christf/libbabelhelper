@@ -137,19 +137,53 @@ free:
 	return 1;
 }
 
-void input_pump(int fd,  void* obj, int blocking_read, void (*lineprocessor)(char* line, void* object)) {
-	FILE *ffd = fdopen(fd, "r");
+int input_pump(int fd,  void* obj, int blocking_read, void (*lineprocessor)(char* line, void* object)) {
 	char *line = NULL;
-	size_t len = 0;
-	int read;
+	char *buffer = NULL;
+	ssize_t len=0;
+	size_t old_len = 0;
+	size_t new_len;
 
-	while ((read = getline(&line, &len, ffd)) != -1) {
-		if (lineprocessor && line)
-			lineprocessor(line, obj);
+	while (len >= 0) {
+		new_len = old_len + LINEBUFFER_SIZE + 1;
+//		printf("reallocating buffer(%zi) %zi\n",old_len, new_len);
+		buffer = realloc(buffer, new_len);
+		if (buffer == NULL) {
+			printf("Cannot allocate buffer\n");
+			return 1;
+		}
+
+		len = read(fd, buffer + old_len, LINEBUFFER_SIZE);
+		if (len == 0)
+			break;
+
+		if (len == -1 && errno == EAGAIN)
+			break;
+
+		buffer[old_len + len] = 0;
+
+		char *stringp;
+
+		while (1) {
+			stringp = buffer;
+			line = strsep(&stringp, "\n");
+			if (stringp == NULL)
+				break; // no line found
+
+			if (lineprocessor && line)
+				lineprocessor(line, obj);
+
+			memmove(buffer, stringp, strlen(stringp) + 1);
+			buffer = realloc(buffer, strlen(buffer) + 1);
+			if (buffer == NULL) {
+				printf("Cannot allocate buffer\n");
+				break;
+			}
+		}
+		old_len = strlen(buffer);
 	}
-
-	free(line);
-	fclose(ffd);
+	free(buffer);
+	return 0;
 }
 
 int babelhelper_babel_connect(int port) {
@@ -194,7 +228,6 @@ void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* 
 	shutdown(sockfd, SHUT_WR);
 	// receive result
 	input_pump(sockfd, object, 1, lineprocessor);
-
 	close(sockfd);
 	return;
 }
