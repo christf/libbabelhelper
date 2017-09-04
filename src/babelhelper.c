@@ -25,6 +25,7 @@
 
 
 #include <libbabelhelper/babelhelper.h>
+#include <sys/time.h>
 
 char* babelhelper_generateip(const char *stringmac, const char *prefix) {
 	char *address = malloc(INET6_ADDRSTRLEN);
@@ -137,7 +138,7 @@ free:
 	return 1;
 }
 
-int input_pump(int fd,  void* obj, int blocking_read, void (*lineprocessor)(char* line, void* object)) {
+int babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line, void* object)) {
 	char *line = NULL;
 	char *buffer = NULL;
 	ssize_t len=0;
@@ -146,7 +147,6 @@ int input_pump(int fd,  void* obj, int blocking_read, void (*lineprocessor)(char
 
 	while (len >= 0) {
 		new_len = old_len + LINEBUFFER_SIZE + 1;
-//		printf("reallocating buffer(%zi) %zi\n",old_len, new_len);
 		buffer = realloc(buffer, new_len);
 		if (buffer == NULL) {
 			printf("Cannot allocate buffer\n");
@@ -213,21 +213,31 @@ int babelhelper_babel_connect(int port) {
 	return sockfd;
 }
 
+int babelhelper_sendcommand(int fd, char *command) {
+	int cmdlen = strlen(command);
+
+	while (send(fd, command, cmdlen, 0) != cmdlen) {
+		perror("Error while sending command %s to babel, retrying");
+		struct timeval timeout =  {
+			.tv_sec=1,
+			.tv_usec=0,
+		};
+		select(fd, NULL, NULL, NULL, &timeout);
+	}
+	return cmdlen;
+}
 
 void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* object))
 {
 	int sockfd = babelhelper_babel_connect(BABEL_PORT);
 
 	// receive and ignore babel header
-	input_pump(sockfd, NULL, 1,  NULL);
-	if (write(sockfd, "dump\n", 5) != 5) {
-		// TODO should we handle this?
-		fprintf(stderr, "could not complete write \"dump\" on the babel socket\n");
-	}
+	babelhelper_input_pump(sockfd, NULL, NULL);
 
-	shutdown(sockfd, SHUT_WR);
+	babelhelper_sendcommand(sockfd, "dump\n");
+
 	// receive result
-	input_pump(sockfd, object, 1, lineprocessor);
+	babelhelper_input_pump(sockfd, object, lineprocessor);
 	close(sockfd);
 	return;
 }

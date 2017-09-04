@@ -68,4 +68,5 @@ void babelhelper_readbabeldata(void* object, void (*lineprocessor)(char*, void* 
 char* babelhelper_generateip(const char *stringmac, const char *prefix);
 int babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6);
 int babelhelper_babel_connect(int port);
-int input_pump(int fd,  void *object, int blocking, void (*lineprocessor)(char*, void* object));
+int babelhelper_sendcommand(int fd, char *command);  
+int babelhelper_input_pump(int fd, void *object, void (*lineprocessor)(char*, void* object));
