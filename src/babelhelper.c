@@ -39,7 +39,7 @@ char* babelhelper_generateip(const char *stringmac, const char *prefix) {
 	mac[4]=0xfe;
 	mac[0] ^= 1 << 1;
 
-	memcpy(dst + 8, mac, 8); 
+	memcpy(dst + 8, mac, 8);
 	inet_ntop(AF_INET6, dst, address, 60);
 	free(dst);
 	return address;
@@ -257,8 +257,8 @@ int babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6) {
 	if (!inet_pton(AF_INET6, linklocal_ip6, &ll_addr))
 		return 1;
 
-	mac[0] = ll_addr.s6_addr[ 8] ^ (1 << 1); 
-	mac[1] = ll_addr.s6_addr[ 9]; 
+	mac[0] = ll_addr.s6_addr[ 8] ^ (1 << 1);
+	mac[1] = ll_addr.s6_addr[ 9];
 	mac[2] = ll_addr.s6_addr[10];
 	mac[3] = ll_addr.s6_addr[13];
 	mac[4] = ll_addr.s6_addr[14];
