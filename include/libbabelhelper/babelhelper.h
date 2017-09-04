@@ -32,6 +32,8 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdbool.h>
+
 
 #define BABEL_PORT 33123
 #define LINEBUFFER_SIZE 256
@@ -67,7 +69,7 @@ int babelhelper_get_route(struct babelroute *dest, char *line);
 void babelhelper_readbabeldata(void* object, void (*lineprocessor)(char*, void* object));
 int babelhelper_babel_connect(int port);
 int babelhelper_sendcommand(int fd, char *command);  
-int babelhelper_input_pump(int fd, void *object, void (*lineprocessor)(char*, void* object));
+bool babelhelper_input_pump(int fd, void *object, void (*lineprocessor)(char*, void* object));
 
 int babelhelper_generateip(char *result,const unsigned char *mac, const char *prefix);
 int babelhelper_generateip_str(char *result,const char *strmac, const char *prefix);

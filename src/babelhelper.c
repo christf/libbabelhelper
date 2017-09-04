@@ -146,7 +146,7 @@ free:
 	return 1;
 }
 
-int babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line, void* object)) {
+bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line, void* object)) {
 	char *line = NULL;
 	char *buffer = NULL;
 	ssize_t len=0;
@@ -158,7 +158,7 @@ int babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line,
 		buffer = realloc(buffer, new_len);
 		if (buffer == NULL) {
 			printf("Cannot allocate buffer\n");
-			return 1;
+			return false;
 		}
 
 		len = read(fd, buffer + old_len, LINEBUFFER_SIZE);
@@ -191,7 +191,7 @@ int babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line,
 		old_len = strlen(buffer);
 	}
 	free(buffer);
-	return 0;
+	return true;
 }
 
 int babelhelper_babel_connect(int port) {
@@ -235,8 +235,7 @@ int babelhelper_sendcommand(int fd, char *command) {
 	return cmdlen;
 }
 
-void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* object))
-{
+void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* object)) {
 	int sockfd = babelhelper_babel_connect(BABEL_PORT);
 
 	// receive and ignore babel header
