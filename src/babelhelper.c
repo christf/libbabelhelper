@@ -27,24 +27,32 @@
 #include <libbabelhelper/babelhelper.h>
 #include <sys/time.h>
 
-char* babelhelper_generateip(const char *stringmac, const char *prefix) {
-	char *address = malloc(INET6_ADDRSTRLEN);
-	unsigned char mac[8];
+int babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
+	unsigned char buffer[8];
+	if (!result)
+		result = malloc(INET6_ADDRSTRLEN);
+
+	memcpy(buffer,mac,3);
+	buffer[3]=0xff;
+	buffer[4]=0xfe;
+	memcpy(&(buffer[5]),&(mac[3]),3);
+	buffer[0] ^= 1 << 1;
+
 	void *dst = malloc(sizeof(struct in6_addr));
-
 	inet_pton(AF_INET6, prefix, dst);
-
-	sscanf(stringmac, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac[0], &mac[1], &mac[2], &mac[5], &mac[6], &mac[7]);
-	mac[3]=0xff;
-	mac[4]=0xfe;
-	mac[0] ^= 1 << 1;
-
-	memcpy(dst + 8, mac, 8);
-	inet_ntop(AF_INET6, dst, address, 60);
+	memcpy(dst + 8, buffer, 8);
+	inet_ntop(AF_INET6, dst, result, INET6_ADDRSTRLEN);
 	free(dst);
-	return address;
+
+	return 0;
 }
 
+int babelhelper_generateip_str(char *result,const char *stringmac, const char *prefix) {
+	unsigned char mac[6];
+	sscanf(stringmac, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+	babelhelper_generateip(result, mac, prefix);
+	return 0;
+}
 
 int babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
 	char *action = NULL;
