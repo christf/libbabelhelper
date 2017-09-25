@@ -27,13 +27,13 @@
 #include <libbabelhelper/babelhelper.h>
 #include <sys/time.h>
 
-int babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
+bool babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
 	unsigned char buffer[8];
 	struct in6_addr dst;
 
 	if (! inet_pton(AF_INET6, prefix, &(dst.s6_addr))) {
 		fprintf(stderr, "inet_pton failed in babelhelper_generateip on address %s.\n",prefix);
-		return 0;
+		return false;
 	}
 
 	memcpy(buffer,mac,3);
@@ -45,16 +45,16 @@ int babelhelper_generateip(char *result, const unsigned char *mac, const char *p
 	memcpy(&(dst.s6_addr[8]), buffer, 8);
 	inet_ntop(AF_INET6, &(dst.s6_addr), result, INET6_ADDRSTRLEN);
 
-	return 1;
+	return true;
 }
 
-int babelhelper_generateip_str(char *result,const char *stringmac, const char *prefix) {
+bool babelhelper_generateip_str(char *result,const char *stringmac, const char *prefix) {
 	unsigned char mac[6];
 	sscanf(stringmac, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
 	return babelhelper_generateip(result, mac, prefix);
 }
 
-int babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
+bool babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
 	char *action = NULL;
 	char *address_str = NULL;
 	char *ifname = NULL;
@@ -79,13 +79,13 @@ int babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
 	dest->txcost = txcost;
 	dest->cost = cost;
 
-	return 0;
+	return true;
 
 free:
 	free(action);
 	free(address_str);
 	free(ifname);
-	return 1;
+	return false;
 }
 
 void babelhelper_babelneighbour_free(struct babelneighbour *bn) {
@@ -104,7 +104,7 @@ void babelhelper_babelroute_free(struct babelroute *br) {
 	free(br->ifname);
 }
 
-int babelhelper_get_route(struct babelroute *dest, char *line) {
+bool babelhelper_get_route(struct babelroute *dest, char *line) {
 	struct babelroute ret;
 	char *action = NULL;
 	char *route = NULL;
@@ -140,10 +140,10 @@ int babelhelper_get_route(struct babelroute *dest, char *line) {
 	ret.ifname = ifname;
 	ret.in6_via = in6_via;
 
-	return 0;
+	return true;
 free:
 	babelhelper_babelroute_free(&ret);
-	return 1;
+	return false;
 }
 
 bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line, void* object)) {
@@ -174,7 +174,9 @@ bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line
 
 		while (1) {
 			stringp = buffer;
-			line = strsep(&stringp, "\n");
+			char sep[1];
+			sep[0]='\n';
+			line = strsep(&stringp, sep);
 			if (stringp == NULL)
 				break; // no line found
 
@@ -256,13 +258,13 @@ void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* 
  *
  * Return: true on success
  */
-int babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6) {
+bool babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6) {
 	struct in6_addr ll_addr;
 	unsigned char mac[6];
 
 	// parse the ip6
 	if (!inet_pton(AF_INET6, linklocal_ip6, &ll_addr))
-		return 1;
+		return false;
 
 	mac[0] = ll_addr.s6_addr[ 8] ^ (1 << 1);
 	mac[1] = ll_addr.s6_addr[ 9];
@@ -273,6 +275,6 @@ int babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6) {
 
 	snprintf(dest, 18, "%02x:%02x:%02x:%02x:%02x:%02x",
 			mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-	return 0;
+	return true;
 }
 
