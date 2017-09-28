@@ -29,7 +29,7 @@
 
 bool babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
 	unsigned char buffer[8];
-	struct in6_addr dst;
+	struct in6_addr dst = {};
 
 	if (! inet_pton(AF_INET6, prefix, &(dst.s6_addr))) {
 		fprintf(stderr, "inet_pton failed in babelhelper_generateip on address %s.\n",prefix);
@@ -50,7 +50,7 @@ bool babelhelper_generateip(char *result, const unsigned char *mac, const char *
 
 bool babelhelper_generateip_str(char *result,const char *stringmac, const char *prefix) {
 	unsigned char mac[6];
-	sscanf(stringmac, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+	sscanf(stringmac, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &(mac[0]), &(mac[1]), &(mac[2]), &(mac[3]), &(mac[4]), &(mac[5]));
 	return babelhelper_generateip(result, mac, prefix);
 }
 
@@ -105,7 +105,7 @@ void babelhelper_babelroute_free(struct babelroute *br) {
 }
 
 bool babelhelper_get_route(struct babelroute *dest, char *line) {
-	struct babelroute ret;
+	struct babelroute ret = {};
 	char *action = NULL;
 	char *route = NULL;
 	char *prefix = NULL;
@@ -122,7 +122,7 @@ bool babelhelper_get_route(struct babelroute *dest, char *line) {
 	if (n != 9)
 		goto free;
 
-	struct in6_addr in6_via;
+	struct in6_addr in6_via = {};
 	if (inet_pton(AF_INET6, via, &in6_via) != 1)
 	{
 		fprintf(stderr, "babeld-parser error: could not convert babel data to ipv6 address: %s\n", via);
@@ -259,7 +259,7 @@ void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* 
  * Return: true on success
  */
 bool babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6) {
-	struct in6_addr ll_addr;
+	struct in6_addr ll_addr = {};
 	unsigned char mac[6];
 
 	// parse the ip6
