@@ -149,49 +149,74 @@ free:
 bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line, void* object)) {
 	char *line = NULL;
 	char *buffer = NULL;
-	ssize_t len=0;
-	size_t old_len = 0;
-	size_t new_len;
+	size_t buffer_used = 0;
+	char *stringp = NULL;
+	ssize_t len = 0;
+	char sep[2];
+	sep[0] = '\n';
+	sep[1] = '\r';
 
-	while (len >= 0) {
-		new_len = old_len + LINEBUFFER_SIZE + 1;
-		buffer = realloc(buffer, new_len);
-		if (buffer == NULL) {
-			printf("Cannot allocate buffer\n");
-			return false;
+	int retval;
+	fd_set rfds;
+	FD_ZERO(&rfds);
+	FD_SET(fd, &rfds);
+
+	do {
+		struct timeval timeout =  {
+			.tv_sec=2,
+			.tv_usec=0,
+		};
+
+		retval = select(fd+1, &rfds, NULL, NULL, &timeout);
+		if (retval == -1) {
+			perror("select()");
 		}
-
-		len = read(fd, buffer + old_len, LINEBUFFER_SIZE);
-		if (len == 0)
-			break;
-
-		if (len == -1 && errno == EAGAIN)
-			break;
-
-		buffer[old_len + len] = 0;
-
-		char *stringp;
-
-		while (1) {
-			stringp = buffer;
-			char sep[1];
-			sep[0]='\n';
-			line = strsep(&stringp, sep);
-			if (stringp == NULL)
-				break; // no line found
-
-			if (lineprocessor && line)
-				lineprocessor(line, obj);
-
-			memmove(buffer, stringp, strlen(stringp) + 1);
-			buffer = realloc(buffer, strlen(buffer) + 1);
+		else if (retval) {
+			buffer = realloc(buffer, buffer_used + LINEBUFFER_SIZE + 1);
 			if (buffer == NULL) {
 				printf("Cannot allocate buffer\n");
+				return false;
+			}
+
+			len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
+			if ( (len == -1 && errno == EAGAIN) || len == 0) {
+				fprintf(stderr, "WE AIN'T FOUND SHIT, SIR!\n");
 				break;
+			} else if (len > 0 ) {
+				buffer[buffer_used + len] = 0;
+				buffer_used = buffer_used + len;
+
+				while ( buffer_used > 0 ) {
+					// TODO: buffer should be a struct, hiding buffer_used, sep and stringp from this function.
+					stringp = buffer;
+					fprintf(stderr, "stringp: %s\nsep: %s",stringp, sep);
+					if (stringp) {
+						line = strsep(&stringp, sep);
+					}
+					if (stringp == NULL) {
+						break; // incomplete line due to INPUT_BUFFER_SIZE_LIMITATION - read some more data, then repeat parsing.
+					}
+					buffer_used--; // when replacing \n with \0 in strsep, the buffer-usage actually shrinks because \0 are not counted
+					int linelength=strlen(line);
+					if (linelength > 0 ) {
+						if (strncmp(line, "ok", 2) == 0 ) {
+							goto free; // we have completed parsing the output of one babel command - exit this function.
+						}
+						if (lineprocessor && line) {
+							lineprocessor(line, obj);
+						}
+						buffer_used-=linelength;
+						memmove(buffer, stringp, buffer_used + 1);
+					}
+				}
 			}
 		}
-		old_len = strlen(buffer);
-	}
+		else {
+			fprintf(stderr, "No data on babel socket within timeout of 2s. This should not happen and certainly is a bug. Retrying.\n");
+		}
+	} while ( buffer_used > 0 || len > 0 );
+
+free:
 	free(buffer);
 	return true;
 }
@@ -225,24 +250,43 @@ int babelhelper_babel_connect(int port) {
 
 int babelhelper_sendcommand(int fd, char *command) {
 	int cmdlen = strlen(command);
+	fd_set wfds;
+	FD_ZERO(&wfds);
+	FD_SET(fd, &wfds);
 
-	while (send(fd, command, cmdlen, 0) != cmdlen) {
-		perror("Error while sending command %s to babel, retrying");
-		struct timeval timeout =  {
-			.tv_sec=1,
-			.tv_usec=0,
-		};
-		select(fd, NULL, NULL, NULL, &timeout);
+	struct timeval timeout =  {
+		.tv_sec=5,
+		.tv_usec=0,
+	};
+
+	int retval = select(fd+1, NULL, &wfds, NULL, &timeout);
+
+	if (retval == -1)
+		perror("select()");
+	else if (retval) {
+		while (send(fd, command, cmdlen, 0) != cmdlen) {
+			perror("Select said the babel socket is ready for writing but we received an error while sending command %s to babel. Retrying.");
+		}
 	}
+	else {
+		fprintf(stderr, "could not write command to babel socket within 5 seconds.\n");
+		return 0;
+	}
+
 	return cmdlen;
 }
 
 void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* object)) {
-	int sockfd = babelhelper_babel_connect(BABEL_PORT);
+
+	int sockfd;
+	do {
+		sockfd = babelhelper_babel_connect(BABEL_PORT);
+		if (sockfd < 0)
+			fprintf(stderr, "connecting to babel socket failed. Retrying.\n");
+	} while (sockfd < 0);
 
 	// receive and ignore babel header
 	babelhelper_input_pump(sockfd, NULL, NULL);
-
 	babelhelper_sendcommand(sockfd, "dump\n");
 
 	// receive result
