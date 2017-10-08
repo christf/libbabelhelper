@@ -64,13 +64,13 @@ struct babelroute{
 
 void babelhelper_babelroute_free(struct babelroute *br);
 void babelhelper_babelneighbour_free(struct babelneighbour *bn);
-int babelhelper_get_neighbour(struct babelneighbour *dest, char *line);
-int babelhelper_get_route(struct babelroute *dest, char *line);
+bool babelhelper_get_neighbour(struct babelneighbour *dest, char *line);
+bool babelhelper_get_route(struct babelroute *dest, char *line);
 void babelhelper_readbabeldata(void* object, void (*lineprocessor)(char*, void* object));
 int babelhelper_babel_connect(int port);
 int babelhelper_sendcommand(int fd, char *command);  
 bool babelhelper_input_pump(int fd, void *object, void (*lineprocessor)(char*, void* object));
 
-int babelhelper_generateip(char *result,const unsigned char *mac, const char *prefix);
-int babelhelper_generateip_str(char *result,const char *strmac, const char *prefix);
-int babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6);
+bool babelhelper_generateip(char *result,const unsigned char *mac, const char *prefix);
+bool babelhelper_generateip_str(char *result,const char *strmac, const char *prefix);
+bool babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6);

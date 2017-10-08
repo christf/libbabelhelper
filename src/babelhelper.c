@@ -27,13 +27,13 @@
 #include <libbabelhelper/babelhelper.h>
 #include <sys/time.h>
 
-int babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
+bool babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
 	unsigned char buffer[8];
-	struct in6_addr dst;
+	struct in6_addr dst = {};
 
 	if (! inet_pton(AF_INET6, prefix, &(dst.s6_addr))) {
 		fprintf(stderr, "inet_pton failed in babelhelper_generateip on address %s.\n",prefix);
-		return 0;
+		return false;
 	}
 
 	memcpy(buffer,mac,3);
@@ -45,16 +45,16 @@ int babelhelper_generateip(char *result, const unsigned char *mac, const char *p
 	memcpy(&(dst.s6_addr[8]), buffer, 8);
 	inet_ntop(AF_INET6, &(dst.s6_addr), result, INET6_ADDRSTRLEN);
 
-	return 1;
+	return true;
 }
 
-int babelhelper_generateip_str(char *result,const char *stringmac, const char *prefix) {
+bool babelhelper_generateip_str(char *result,const char *stringmac, const char *prefix) {
 	unsigned char mac[6];
-	sscanf(stringmac, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]);
+	sscanf(stringmac, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &(mac[0]), &(mac[1]), &(mac[2]), &(mac[3]), &(mac[4]), &(mac[5]));
 	return babelhelper_generateip(result, mac, prefix);
 }
 
-int babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
+bool babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
 	char *action = NULL;
 	char *address_str = NULL;
 	char *ifname = NULL;
@@ -79,13 +79,13 @@ int babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
 	dest->txcost = txcost;
 	dest->cost = cost;
 
-	return 0;
+	return true;
 
 free:
 	free(action);
 	free(address_str);
 	free(ifname);
-	return 1;
+	return false;
 }
 
 void babelhelper_babelneighbour_free(struct babelneighbour *bn) {
@@ -104,8 +104,8 @@ void babelhelper_babelroute_free(struct babelroute *br) {
 	free(br->ifname);
 }
 
-int babelhelper_get_route(struct babelroute *dest, char *line) {
-	struct babelroute ret;
+bool babelhelper_get_route(struct babelroute *dest, char *line) {
+	struct babelroute ret = {};
 	char *action = NULL;
 	char *route = NULL;
 	char *prefix = NULL;
@@ -122,7 +122,7 @@ int babelhelper_get_route(struct babelroute *dest, char *line) {
 	if (n != 9)
 		goto free;
 
-	struct in6_addr in6_via;
+	struct in6_addr in6_via = {};
 	if (inet_pton(AF_INET6, via, &in6_via) != 1)
 	{
 		fprintf(stderr, "babeld-parser error: could not convert babel data to ipv6 address: %s\n", via);
@@ -140,56 +140,83 @@ int babelhelper_get_route(struct babelroute *dest, char *line) {
 	ret.ifname = ifname;
 	ret.in6_via = in6_via;
 
-	return 0;
+	return true;
 free:
 	babelhelper_babelroute_free(&ret);
-	return 1;
+	return false;
 }
 
 bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line, void* object)) {
 	char *line = NULL;
 	char *buffer = NULL;
-	ssize_t len=0;
-	size_t old_len = 0;
-	size_t new_len;
+	size_t buffer_used = 0;
+	char *stringp = NULL;
+	ssize_t len = 0;
+	char sep[2];
+	sep[0] = '\n';
+	sep[1] = '\r';
 
-	while (len >= 0) {
-		new_len = old_len + LINEBUFFER_SIZE + 1;
-		buffer = realloc(buffer, new_len);
-		if (buffer == NULL) {
-			printf("Cannot allocate buffer\n");
-			return false;
+	int retval;
+	fd_set rfds;
+	FD_ZERO(&rfds);
+	FD_SET(fd, &rfds);
+
+	do {
+		struct timeval timeout =  {
+			.tv_sec=2,
+			.tv_usec=0,
+		};
+
+		retval = select(fd+1, &rfds, NULL, NULL, &timeout);
+		if (retval == -1) {
+			perror("select()");
 		}
-
-		len = read(fd, buffer + old_len, LINEBUFFER_SIZE);
-		if (len == 0)
-			break;
-
-		if (len == -1 && errno == EAGAIN)
-			break;
-
-		buffer[old_len + len] = 0;
-
-		char *stringp;
-
-		while (1) {
-			stringp = buffer;
-			line = strsep(&stringp, "\n");
-			if (stringp == NULL)
-				break; // no line found
-
-			if (lineprocessor && line)
-				lineprocessor(line, obj);
-
-			memmove(buffer, stringp, strlen(stringp) + 1);
-			buffer = realloc(buffer, strlen(buffer) + 1);
+		else if (retval) {
+			buffer = realloc(buffer, buffer_used + LINEBUFFER_SIZE + 1);
 			if (buffer == NULL) {
 				printf("Cannot allocate buffer\n");
+				return false;
+			}
+
+			len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
+			if ( (len == -1 && errno == EAGAIN) || len == 0) {
+				fprintf(stderr, "WE AIN'T FOUND SHIT, SIR!\n");
 				break;
+			} else if (len > 0 ) {
+				buffer[buffer_used + len] = 0;
+				buffer_used = buffer_used + len;
+
+				while ( buffer_used > 0 ) {
+					// TODO: buffer should be a struct, hiding buffer_used, sep and stringp from this function.
+					stringp = buffer;
+					fprintf(stderr, "stringp: %s\nsep: %s",stringp, sep);
+					if (stringp) {
+						line = strsep(&stringp, sep);
+					}
+					if (stringp == NULL) {
+						break; // incomplete line due to INPUT_BUFFER_SIZE_LIMITATION - read some more data, then repeat parsing.
+					}
+					buffer_used--; // when replacing \n with \0 in strsep, the buffer-usage actually shrinks because \0 are not counted
+					int linelength=strlen(line);
+					if (linelength > 0 ) {
+						if (strncmp(line, "ok", 2) == 0 ) {
+							goto free; // we have completed parsing the output of one babel command - exit this function.
+						}
+						if (lineprocessor && line) {
+							lineprocessor(line, obj);
+						}
+						buffer_used-=linelength;
+						memmove(buffer, stringp, buffer_used + 1);
+					}
+				}
 			}
 		}
-		old_len = strlen(buffer);
-	}
+		else {
+			fprintf(stderr, "No data on babel socket within timeout of 2s. This should not happen and certainly is a bug. Retrying.\n");
+		}
+	} while ( buffer_used > 0 || len > 0 );
+
+free:
 	free(buffer);
 	return true;
 }
@@ -223,24 +250,43 @@ int babelhelper_babel_connect(int port) {
 
 int babelhelper_sendcommand(int fd, char *command) {
 	int cmdlen = strlen(command);
+	fd_set wfds;
+	FD_ZERO(&wfds);
+	FD_SET(fd, &wfds);
 
-	while (send(fd, command, cmdlen, 0) != cmdlen) {
-		perror("Error while sending command %s to babel, retrying");
-		struct timeval timeout =  {
-			.tv_sec=1,
-			.tv_usec=0,
-		};
-		select(fd, NULL, NULL, NULL, &timeout);
+	struct timeval timeout =  {
+		.tv_sec=5,
+		.tv_usec=0,
+	};
+
+	int retval = select(fd+1, NULL, &wfds, NULL, &timeout);
+
+	if (retval == -1)
+		perror("select()");
+	else if (retval) {
+		while (send(fd, command, cmdlen, 0) != cmdlen) {
+			perror("Select said the babel socket is ready for writing but we received an error while sending command %s to babel. Retrying.");
+		}
 	}
+	else {
+		fprintf(stderr, "could not write command to babel socket within 5 seconds.\n");
+		return 0;
+	}
+
 	return cmdlen;
 }
 
 void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* object)) {
-	int sockfd = babelhelper_babel_connect(BABEL_PORT);
+
+	int sockfd;
+	do {
+		sockfd = babelhelper_babel_connect(BABEL_PORT);
+		if (sockfd < 0)
+			fprintf(stderr, "connecting to babel socket failed. Retrying.\n");
+	} while (sockfd < 0);
 
 	// receive and ignore babel header
 	babelhelper_input_pump(sockfd, NULL, NULL);
-
 	babelhelper_sendcommand(sockfd, "dump\n");
 
 	// receive result
@@ -256,13 +302,13 @@ void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* 
  *
  * Return: true on success
  */
-int babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6) {
-	struct in6_addr ll_addr;
+bool babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6) {
+	struct in6_addr ll_addr = {};
 	unsigned char mac[6];
 
 	// parse the ip6
 	if (!inet_pton(AF_INET6, linklocal_ip6, &ll_addr))
-		return 1;
+		return false;
 
 	mac[0] = ll_addr.s6_addr[ 8] ^ (1 << 1);
 	mac[1] = ll_addr.s6_addr[ 9];
@@ -273,6 +319,6 @@ int babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6) {
 
 	snprintf(dest, 18, "%02x:%02x:%02x:%02x:%02x:%02x",
 			mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-	return 0;
+	return true;
 }
 
