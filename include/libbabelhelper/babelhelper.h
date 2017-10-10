@@ -62,8 +62,8 @@ struct babelroute{
 	struct in6_addr in6_via;
 };
 
-void babelhelper_babelroute_free(struct babelroute *br);
-void babelhelper_babelneighbour_free(struct babelneighbour *bn);
+void babelhelper_babelroute_free_members(struct babelroute *br);
+void babelhelper_babelneighbour_free_members(struct babelneighbour *bn);
 bool babelhelper_get_neighbour(struct babelneighbour *dest, char *line);
 bool babelhelper_get_route(struct babelroute *dest, char *line);
 void babelhelper_readbabeldata(void* object, void (*lineprocessor)(char*, void* object));

@@ -88,13 +88,13 @@ free:
 	return false;
 }
 
-void babelhelper_babelneighbour_free(struct babelneighbour *bn) {
-	if (bn->action) free(bn->action);
-	if (bn->address_str) free(bn->address_str);
-	if (bn->ifname) free(bn->ifname);
+void babelhelper_babelneighbour_free_members(struct babelneighbour *bn) {
+	free(bn->action);
+	free(bn->address_str);
+	free(bn->ifname);
 }
 
-void babelhelper_babelroute_free(struct babelroute *br) {
+void babelhelper_babelroute_free_members(struct babelroute *br) {
 	free(br->action);
 	free(br->route);
 	free(br->prefix);
@@ -142,7 +142,7 @@ bool babelhelper_get_route(struct babelroute *dest, char *line) {
 
 	return true;
 free:
-	babelhelper_babelroute_free(&ret);
+	babelhelper_babelroute_free_members(&ret);
 	return false;
 }
 
@@ -174,7 +174,7 @@ bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line
 		else if (retval) {
 			buffer = realloc(buffer, buffer_used + LINEBUFFER_SIZE + 1);
 			if (buffer == NULL) {
-				printf("Cannot allocate buffer\n");
+				fprintf(stderr, "Cannot allocate buffer\n");
 				return false;
 			}
 
@@ -189,18 +189,18 @@ bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line
 				while ( buffer_used > 0 ) {
 					// TODO: buffer should be a struct, hiding buffer_used, sep and stringp from this function.
 					stringp = buffer;
-					fprintf(stderr, "stringp: %s\nsep: %s",stringp, sep);
 					if (stringp) {
 						line = strsep(&stringp, sep);
 					}
 					if (stringp == NULL) {
 						break; // incomplete line due to INPUT_BUFFER_SIZE_LIMITATION - read some more data, then repeat parsing.
 					}
-					buffer_used--; // when replacing \n with \0 in strsep, the buffer-usage actually shrinks because \0 are not counted
+					buffer_used--; // when replacing \n with \0 in strsep, the buffer-usage actually shrinks because \0 are not counted by strlen
 					int linelength=strlen(line);
 					if (linelength > 0 ) {
 						if (strncmp(line, "ok", 2) == 0 ) {
 							goto free; // we have completed parsing the output of one babel command - exit this function.
+							// TODO: exiting based on the content of the line should probably be done by the lineprocessor.
 						}
 						if (lineprocessor && line) {
 							lineprocessor(line, obj);
@@ -303,6 +303,9 @@ void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* 
  * Return: true on success
  */
 bool babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6) {
+	if (!linklocal_ip6)
+		return false;
+
 	struct in6_addr ll_addr = {};
 	unsigned char mac[6];
 
