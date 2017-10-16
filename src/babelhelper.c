@@ -169,7 +169,7 @@ bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line
 
 		retval = select(fd+1, &rfds, NULL, NULL, &timeout);
 		if (retval == -1) {
-			perror("select()");
+			perror("Error on select(), reading from babel socket.");
 		}
 		else if (retval) {
 			buffer = realloc(buffer, buffer_used + LINEBUFFER_SIZE + 1);
@@ -212,7 +212,8 @@ bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line
 			}
 		}
 		else {
-			fprintf(stderr, "No data on babel socket within timeout of 2s. This should not happen and certainly is a bug. Retrying.\n");
+			fprintf(stderr, "No data on babel socket within timeout of 2s. This should not happen and certainly is a bug.\n");
+			break;
 		}
 	} while ( buffer_used > 0 || len > 0 );
 
@@ -287,7 +288,10 @@ void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* 
 
 	// receive and ignore babel header
 	babelhelper_input_pump(sockfd, NULL, NULL);
-	babelhelper_sendcommand(sockfd, "dump\n");
+	int amount = 0;
+	while (amount != 5 ) {
+		amount = babelhelper_sendcommand(sockfd, "dump\n");
+	}
 
 	// receive result
 	babelhelper_input_pump(sockfd, object, lineprocessor);
