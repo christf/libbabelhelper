@@ -68,6 +68,7 @@ void babelhelper_babelneighbour_free_members(struct babelneighbour *bn);
 bool babelhelper_get_neighbour(struct babelneighbour *dest, char *line);
 bool babelhelper_get_route(struct babelroute *dest, char *line);
 void babelhelper_readbabeldata(void* object, bool (*lineprocessor)(char*, void* object));
+bool babelhelper_discard_response(char *lineptr, void *object);
 int babelhelper_babel_connect(int port);
 int babelhelper_sendcommand(int fd, char *command);  
 bool babelhelper_input_pump(int fd, void *object, bool (*lineprocessor)(char*, void* object));

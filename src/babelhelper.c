@@ -274,7 +274,7 @@ int babelhelper_sendcommand(int fd, char *command) {
 }
 
 
-static bool discard_response(char *lineptr, void *object) {
+bool babelhelper_discard_response(char *lineptr, void *object) {
 	return !!strncmp(lineptr, "ok", 2);
 }
 
@@ -288,7 +288,7 @@ void babelhelper_readbabeldata(void *object, bool (*lineprocessor)(char*, void* 
 	} while (sockfd < 0);
 
 	// receive and ignore babel header
-	while ( ! babelhelper_input_pump(sockfd, NULL, discard_response))
+	while ( ! babelhelper_input_pump(sockfd, NULL, babelhelper_discard_response))
 		printf("Retrying to skip babel header. reading from babel socket.\n");
 
 	int amount = 0;
