@@ -146,21 +146,18 @@ free:
 	return false;
 }
 
-bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line, void* object)) {
+bool babelhelper_input_pump(int fd,  void* obj, bool (*lineprocessor)(char* line, void* object)) {
 	char *line = NULL;
 	char *buffer = NULL;
 	size_t buffer_used = 0;
 	char *stringp = NULL;
 	ssize_t len = 0;
-	char sep[2];
-	sep[0] = '\n';
-	sep[1] = '\r';
+	const char *sep = "\n\r";
 
 	int retval;
 	fd_set rfds;
 	FD_ZERO(&rfds);
 	FD_SET(fd, &rfds);
-
 	do {
 		struct timeval timeout =  {
 			.tv_sec=2,
@@ -170,8 +167,7 @@ bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line
 		retval = select(fd+1, &rfds, NULL, NULL, &timeout);
 		if (retval == -1) {
 			perror("Error on select(), reading from babel socket.");
-		}
-		else if (retval) {
+		} else if (retval) {
 			buffer = realloc(buffer, buffer_used + LINEBUFFER_SIZE + 1);
 			if (buffer == NULL) {
 				fprintf(stderr, "Cannot allocate buffer\n");
@@ -185,7 +181,6 @@ bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line
 			} else if (len > 0 ) {
 				buffer[buffer_used + len] = 0;
 				buffer_used = buffer_used + len;
-
 				while ( buffer_used > 0 ) {
 					// TODO: buffer should be a struct, hiding buffer_used, sep and stringp from this function.
 					stringp = buffer;
@@ -196,28 +191,29 @@ bool babelhelper_input_pump(int fd,  void* obj, void (*lineprocessor)(char* line
 						break; // incomplete line due to INPUT_BUFFER_SIZE_LIMITATION - read some more data, then repeat parsing.
 					}
 					buffer_used--; // when replacing \n with \0 in strsep, the buffer-usage actually shrinks because \0 are not counted by strlen
-					int linelength=strlen(line);
-					if (linelength > 0 ) {
-						if (strncmp(line, "ok", 2) == 0 ) {
-							goto free; // we have completed parsing the output of one babel command - exit this function.
-							// TODO: exiting based on the content of the line should probably be done by the lineprocessor.
+
+					if (line) {
+						size_t linelength = strlen(line);
+						if (linelength > 0) {
+							if (!lineprocessor(line, obj) ) {
+								goto out;
+							}
+							buffer_used-=linelength;
+							memmove(buffer, stringp, buffer_used + 1);
 						}
-						if (lineprocessor && line) {
-							lineprocessor(line, obj);
-						}
-						buffer_used-=linelength;
-						memmove(buffer, stringp, buffer_used + 1);
 					}
 				}
+			} else {
+				printf("didn't read anything but no errori %i\n", errno);
 			}
-		}
-		else {
+		} else {
 			fprintf(stderr, "No data on babel socket within timeout of 2s.\n");
-			break;
+			free(buffer);
+			return false;
 		}
 	} while ( buffer_used > 0 || len > 0 );
 
-free:
+out:
 	free(buffer);
 	return true;
 }
@@ -277,24 +273,32 @@ int babelhelper_sendcommand(int fd, char *command) {
 	return cmdlen;
 }
 
-void babelhelper_readbabeldata(void *object, void (*lineprocessor)(char*, void* object)) {
+
+static bool discard_response(char *lineptr, void *object) {
+	return !!strncmp(lineptr, "ok", 2);
+}
+
+void babelhelper_readbabeldata(void *object, bool (*lineprocessor)(char*, void* object)) {
 
 	int sockfd;
 	do {
 		sockfd = babelhelper_babel_connect(BABEL_PORT);
 		if (sockfd < 0)
-			fprintf(stderr, "connecting to babel socket failed. Retrying.\n");
+			fprintf(stderr, "Connecting to babel socket failed. Retrying.\n");
 	} while (sockfd < 0);
 
 	// receive and ignore babel header
-	babelhelper_input_pump(sockfd, NULL, NULL);
+	while ( ! babelhelper_input_pump(sockfd, NULL, discard_response))
+		printf("Retrying to skip babel header. reading from babel socket.\n");
+
 	int amount = 0;
 	while (amount != 5 ) {
 		amount = babelhelper_sendcommand(sockfd, "dump\n");
 	}
 
 	// receive result
-	babelhelper_input_pump(sockfd, object, lineprocessor);
+	while ( ! babelhelper_input_pump(sockfd, object, lineprocessor))
+		printf("Retrying reading from babel socket.\n");
 	close(sockfd);
 	return;
 }
