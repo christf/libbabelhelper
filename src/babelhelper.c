@@ -146,7 +146,7 @@ free:
 	return false;
 }
 
-bool babelhelper_input_pump(int fd,  void* obj, bool (*lineprocessor)(char* line, void* object)) {
+bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool (*lineprocessor)(char* line, void* object)) {
 	char *line = NULL;
 	char *buffer = NULL;
 	size_t buffer_used = 0;
@@ -176,38 +176,38 @@ bool babelhelper_input_pump(int fd,  void* obj, bool (*lineprocessor)(char* line
 
 			len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
 			if ( (len == -1 && errno == EAGAIN) || len == 0) {
-				fprintf(stderr, "WE AIN'T FOUND SHIT, SIR!\n");
+				fprintf(stderr, "Could not read data from buffer. This should not happen.\n");
 				break;
 			} else if (len > 0 ) {
 				buffer[buffer_used + len] = 0;
 				buffer_used = buffer_used + len;
 				while ( buffer_used > 0 ) {
-					// TODO: buffer should be a struct, hiding buffer_used, sep and stringp from this function.
 					stringp = buffer;
-					if (stringp) {
-						line = strsep(&stringp, sep);
-					}
 					if (stringp == NULL) {
 						break; // incomplete line due to INPUT_BUFFER_SIZE_LIMITATION - read some more data, then repeat parsing.
 					}
-					buffer_used--; // when replacing \n with \0 in strsep, the buffer-usage actually shrinks because \0 are not counted by strlen
+					else if (stringp) {
+						line = strsep(&stringp, sep);
 
-					if (line) {
-						size_t linelength = strlen(line);
-						if (linelength > 0) {
-							if (!lineprocessor(line, obj) ) {
-								goto out;
+						if (line) {
+							buffer_used--; // when replacing \n with \0 in strsep, the buffer-usage shrinks because \0 are not counted by strlen
+							size_t linelength = strlen(line);
+							if (linelength > 0) {
+								if (!lineprocessor(line, obj) ) {
+									goto out;
+								}
+								buffer_used-=linelength;
+								memmove(buffer, stringp, buffer_used + 1);
 							}
-							buffer_used-=linelength;
-							memmove(buffer, stringp, buffer_used + 1);
 						}
 					}
 				}
 			} else {
-				printf("didn't read anything but no errori %i\n", errno);
+				printf("didn't read anything but no error %i\n", errno);
 			}
 		} else {
-			fprintf(stderr, "No data on babel socket within timeout of 2s.\n");
+			if (ctx->debug)
+				fprintf(stderr, "No data on babel socket within timeout of %li seconds and %li usecs.\n", timeout.tv_sec, timeout.tv_usec);
 			free(buffer);
 			return false;
 		}
@@ -245,7 +245,7 @@ int babelhelper_babel_connect(int port) {
 	return sockfd;
 }
 
-int babelhelper_sendcommand(int fd, char *command) {
+int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command) {
 	int cmdlen = strlen(command);
 	fd_set wfds;
 	FD_ZERO(&wfds);
@@ -262,11 +262,12 @@ int babelhelper_sendcommand(int fd, char *command) {
 		perror("select()");
 	else if (retval) {
 		while (send(fd, command, cmdlen, 0) != cmdlen) {
-			perror("Select said the babel socket is ready for writing but we received an error while sending command %s to babel. Retrying.");
+			perror("Select said the babel socket is ready for writing but we received an error while sending command %s to babel. This should not happen. Retrying.");
 		}
 	}
 	else {
-		fprintf(stderr, "could not write command to babel socket within 5 seconds.\n");
+		if (ctx->debug)
+			fprintf(stderr, "could not write command to babel socket within 5 seconds.\n");
 		return 0;
 	}
 
@@ -278,9 +279,9 @@ bool babelhelper_discard_response(char *lineptr, void *object) {
 	return !!strncmp(lineptr, "ok", 2);
 }
 
-void babelhelper_readbabeldata(void *object, bool (*lineprocessor)(char*, void* object)) {
-
+void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*lineprocessor)(char*, void* object)) {
 	int sockfd;
+
 	do {
 		sockfd = babelhelper_babel_connect(BABEL_PORT);
 		if (sockfd < 0)
@@ -288,17 +289,17 @@ void babelhelper_readbabeldata(void *object, bool (*lineprocessor)(char*, void* 
 	} while (sockfd < 0);
 
 	// receive and ignore babel header
-	while ( ! babelhelper_input_pump(sockfd, NULL, babelhelper_discard_response))
-		printf("Retrying to skip babel header. reading from babel socket.\n");
+	while ( ! babelhelper_input_pump(ctx, sockfd, NULL, babelhelper_discard_response))
+		fprintf(stderr, "Retrying to skip babel header. Reading from babel socket.\n");
 
-	int amount = 0;
-	while (amount != 5 ) {
-		amount = babelhelper_sendcommand(sockfd, "dump\n");
-	}
+	// query babel data
+	while ( babelhelper_sendcommand(ctx, sockfd, "dump\n") != 5 )
+		fprintf(stderr, "Retrying to send dump-command to babel socket.\n");
 
 	// receive result
-	while ( ! babelhelper_input_pump(sockfd, object, lineprocessor))
-		printf("Retrying reading from babel socket.\n");
+	while ( ! babelhelper_input_pump(ctx, sockfd, object, lineprocessor))
+		fprintf(stderr, "Retrying reading from babel socket.\n");
+
 	close(sockfd);
 	return;
 }
