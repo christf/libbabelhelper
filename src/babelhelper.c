@@ -183,22 +183,22 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 				buffer_used = buffer_used + len;
 				while ( buffer_used > 0 ) {
 					stringp = buffer;
+					if (stringp) {
+						line = strsep(&stringp, sep);
+					}
 					if (stringp == NULL) {
 						break; // incomplete line due to INPUT_BUFFER_SIZE_LIMITATION - read some more data, then repeat parsing.
 					}
-					else if (stringp) {
-						line = strsep(&stringp, sep);
+					buffer_used--; // when replacing \n with \0 in strsep, the buffer-usage actually shrinks because \0 are not counted by strlen
 
-						if (line) {
-							buffer_used--; // when replacing \n with \0 in strsep, the buffer-usage shrinks because \0 are not counted by strlen
-							size_t linelength = strlen(line);
-							if (linelength > 0) {
-								if (!lineprocessor(line, obj) ) {
-									goto out;
-								}
-								buffer_used-=linelength;
-								memmove(buffer, stringp, buffer_used + 1);
+					if (line) {
+						size_t linelength = strlen(line);
+						if (linelength > 0) {
+							if (!lineprocessor(line, obj) ) {
+								goto out;
 							}
+							buffer_used-=linelength;
+							memmove(buffer, stringp, buffer_used + 1);
 						}
 					}
 				}
