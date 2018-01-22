@@ -176,7 +176,6 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 
 			len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
 			if ( (len == -1 && errno == EAGAIN) || len == 0) {
-				fprintf(stderr, "Could not read data from buffer. This should not happen.\n");
 				break;
 			} else if (len > 0 ) {
 				buffer[buffer_used + len] = 0;
