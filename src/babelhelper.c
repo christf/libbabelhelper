@@ -60,7 +60,7 @@ bool babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
 	char *ifname = NULL;
 	int reach, cost, rxcost, txcost;
 	int n = sscanf(line, "%ms neighbour %*x address %ms if %ms "
-			"reach %x rxcost %d txcost %d cost %d",
+			"reach %x ureach %*x rxcost %d txcost %d cost %d",
 			&action, &address_str, &ifname, &reach, &rxcost, &txcost, &cost);
 
 	if (n != 7)
