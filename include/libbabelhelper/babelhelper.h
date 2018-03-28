@@ -39,6 +39,44 @@
 #define LINEBUFFER_SIZE 256
 #define TRACE {printf("%s: %d\n", __FILE__, __LINE__);};
 
+
+#define FOREACH_BABEL_TOKEN(BABEL_TOKEN) \
+        BABEL_TOKEN(VERB)   \
+        BABEL_TOKEN(XROUTE)  \
+        BABEL_TOKEN(INTERFACE)   \
+        BABEL_TOKEN(ROUTE)   \
+        BABEL_TOKEN(NEIGHBOUR)   \
+        BABEL_TOKEN(ADDRESS)   \
+        BABEL_TOKEN(IF)   \
+        BABEL_TOKEN(PREFIX)   \
+        BABEL_TOKEN(FROM)   \
+        BABEL_TOKEN(METRIC)   \
+        BABEL_TOKEN(COST)   \
+        BABEL_TOKEN(RXCOST)   \
+        BABEL_TOKEN(TXCOST)   \
+        BABEL_TOKEN(IPV6)   \
+        BABEL_TOKEN(IPV4)   \
+        BABEL_TOKEN(REACH)   \
+        BABEL_TOKEN(UP)   \
+        BABEL_TOKEN(OK) \
+        BABEL_TOKEN(UNKNOWN)
+
+#define GENERATE_ENUM(ENUM) ENUM,
+#define GENERATE_STRING(STRING) #STRING,
+
+enum BABEL_TOKEN_ENUM {
+    FOREACH_BABEL_TOKEN(GENERATE_ENUM)
+};
+static const char *BABEL_TOKEN_STRING[] = {
+    FOREACH_BABEL_TOKEN(GENERATE_STRING)
+};
+
+#define str(x) #x
+#define xstr(x) str(x)
+
+#define num_different_tokens UNKNOWN+1
+
+
 struct babelneighbour {
 	char *action;
 	char *address_str;
@@ -69,13 +107,12 @@ struct babelhelper_ctx {
 
 void babelhelper_babelroute_free_members(struct babelroute *br);
 void babelhelper_babelneighbour_free_members(struct babelneighbour *bn);
-bool babelhelper_get_neighbour(struct babelneighbour *dest, char *line);
-bool babelhelper_get_route(struct babelroute *dest, char *line);
-void babelhelper_readbabeldata(struct babelhelper_ctx *ctx, void* object, bool (*lineprocessor)(char*, void* object));
-bool babelhelper_discard_response(char *lineptr, void *object);
+void babelhelper_readbabeldata(struct babelhelper_ctx *ctx, void* object, bool (*lineprocessor)(char**, void* object));
+bool babelhelper_discard_response(char **data, void *object);
 int babelhelper_babel_connect(int port);
 int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command); 
-bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd, void *object, bool (*lineprocessor)(char*, void* object));
+bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd, void *object, bool (*lineprocessor)(char**, void* object));
+void printrecognized(char **data);
 
 bool babelhelper_generateip(char *result,const unsigned char *mac, const char *prefix);
 bool babelhelper_generateip_str(char *result,const char *strmac, const char *prefix);

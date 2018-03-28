@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2017, Christof Schulze <christof.schulze@gmx.net>
+   Copyright (c) 2017,2018 Christof Schulze <christof.schulze@gmx.net>
    All rights reserved.
 
    Redistribution and use in source and binary forms, with or without
@@ -26,6 +26,7 @@
 
 #include <libbabelhelper/babelhelper.h>
 #include <sys/time.h>
+#include <ctype.h>
 
 bool babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
 	unsigned char buffer[8];
@@ -54,105 +55,73 @@ bool babelhelper_generateip_str(char *result,const char *stringmac, const char *
 	return babelhelper_generateip(result, mac, prefix);
 }
 
-bool babelhelper_get_neighbour(struct babelneighbour *dest, char *line) {
-	char *action = NULL;
-	char *address_str = NULL;
-	char *ifname = NULL;
-	int reach, cost, rxcost, txcost;
-	int n = sscanf(line, "%ms neighbour %*x address %ms if %ms "
-			"reach %x ureach %*x rxcost %d txcost %d cost %d",
-			&action, &address_str, &ifname, &reach, &rxcost, &txcost, &cost);
-
-	if (n != 7)
-		goto free;
-
-	if (inet_pton(AF_INET6, address_str, &(dest->address)) != 1)
-	{
-		fprintf(stderr, "babeld-parser error: could not convert babel data to ipv6 address: %s\n", address_str);
-		goto free;
+char *tolower_s(char *str) {
+	for(int i = 0; str[i]; i++){
+		str[i] = tolower(str[i]);
 	}
-	dest->action = action;
-	dest->address_str = address_str;
-	dest->ifname = ifname;
-	dest->reach = reach;
-	dest->rxcost = rxcost;
-	dest->txcost = txcost;
-	dest->cost = cost;
-
-	return true;
-
-free:
-	free(action);
-	free(address_str);
-	free(ifname);
-	return false;
+	return str;
 }
 
-void babelhelper_babelneighbour_free_members(struct babelneighbour *bn) {
-	free(bn->action);
-	free(bn->address_str);
-	free(bn->ifname);
+int gettoken(char* token) {
+	// TODO: how can we do this more efficiently?
+	for (int i=0;i<num_different_tokens;i++) {
+		char *lowerstring = tolower_s(strdup(BABEL_TOKEN_STRING[i])); 
+		if (!strncmp(token, lowerstring, strlen(BABEL_TOKEN_STRING[i])) ) {
+			free(lowerstring);
+			return i;
+		}
+		free(lowerstring);
+	}
+	return UNKNOWN;
 }
 
-void babelhelper_babelroute_free_members(struct babelroute *br) {
-	free(br->action);
-	free(br->route);
-	free(br->prefix);
-	free(br->from);
-	free(br->id);
-	free(br->via);
-	free(br->ifname);
+void printifdefined(int token, char **babeldata) {
+	if (babeldata[token] && *babeldata[token])
+		printf("%s: %s ", BABEL_TOKEN_STRING[token], babeldata[token]);
 }
 
-bool babelhelper_get_route(struct babelroute *dest, char *line) {
-	struct babelroute ret = {};
-	char *action = NULL;
-	char *route = NULL;
-	char *prefix = NULL;
-	char *from = NULL;
-	char *id = NULL;
-	int metric;
-	int refmetric ;
-	char *via = NULL;
-	char *ifname = NULL;
+void printrecognized(char** babeldata){
+	printf("parsed babeld-line contained the following known tokens: ");
+	for (int i=0;i<num_different_tokens;i++)
+		printifdefined(i, babeldata);
+	printf("\n");
+}
 
-	int n = sscanf(line, "%s route %s prefix %s from %s installed yes id %s metric %d refmetric %d via %s if %s",
-			action, route, prefix, from, id, &metric, &refmetric, via, ifname );
+/* reallocates the buffer an shifts all the pointers addresses that are used
+ * for the line parser
+ * */
+void realloc_and_compensate_for_move(char **buffer, size_t newsize, char **babeldata, char **token ) {
 
-	if (n != 9)
-		goto free;
+	char *oldpointer = *buffer;
 
-	struct in6_addr in6_via = {};
-	if (inet_pton(AF_INET6, via, &in6_via) != 1)
-	{
-		fprintf(stderr, "babeld-parser error: could not convert babel data to ipv6 address: %s\n", via);
-		goto free;
+	*buffer = realloc(*buffer, newsize);
+	if (buffer == NULL) {
+		perror("Cannot allocate buffer");
+		exit(1);
 	}
 
-	ret.action = action;
-	ret.route = route;
-	ret.prefix = prefix;
-	ret.from = from;
-	ret.id = id;
-	ret.metric = metric;
-	ret.refmetric = refmetric;
-	ret.via = via;
-	ret.ifname = ifname;
-	ret.in6_via = in6_via;
-
-	return true;
-free:
-	babelhelper_babelroute_free_members(&ret);
-	return false;
+	for (int i=0;i<num_different_tokens;i++) {// compensate already found addresses for words for new position due to buffer realloc 
+		if (babeldata[i])
+			babeldata[i] += (*buffer - oldpointer);
+	}
+	if (*token)
+		*token += (*buffer - oldpointer);
 }
 
-bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool (*lineprocessor)(char* line, void* object)) {
-	char *line = NULL;
+/* this will read data from a nonblocking socket, and parse this line-wise and
+ * for babel tokens in one single loop
+ * It will return an array of char* to each token
+ */
+bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool (*lineprocessor)(char** babeldata, void* object)) {
 	char *buffer = NULL;
 	size_t buffer_used = 0;
-	char *stringp = NULL;
 	ssize_t len = 0;
-	const char *sep = "\n\r";
+	bool waitingforclosingquote=false;
+	bool foundverb = false;
+	char *token = NULL;
+	int lasti = 0;
+	char *parseddata[num_different_tokens];
+	memset(parseddata, 0 , sizeof(parseddata));
 
 	int retval;
 	fd_set rfds;
@@ -168,38 +137,65 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 		if (retval == -1) {
 			perror("Error on select(), reading from babel socket.");
 		} else if (retval) {
-			buffer = realloc(buffer, buffer_used + LINEBUFFER_SIZE + 1);
-			if (buffer == NULL) {
-				fprintf(stderr, "Cannot allocate buffer\n");
-				return false;
-			}
-
+			realloc_and_compensate_for_move(&buffer, buffer_used + LINEBUFFER_SIZE + 1, (void*)&parseddata, &token);
 			len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
+			buffer[buffer_used+len] = 0; // terminate string appropriately. This will be overwritten if more data is read.
+
 			if ( (len == -1 && errno == EAGAIN) || len == 0) {
 				break;
 			} else if (len > 0 ) {
 				buffer[buffer_used + len] = 0;
 				buffer_used = buffer_used + len;
+				int i=0;
 				while ( buffer_used > 0 ) {
-					stringp = buffer;
-					if (stringp) {
-						line = strsep(&stringp, sep);
+					switch (buffer[i]) {
+						case '"':
+							waitingforclosingquote = !waitingforclosingquote;
+							break;
+						case '\n':
+						case '\r':
+							buffer[i]='\0';
+							if (!strncmp(buffer, "ok", 2))
+								goto out;
+							if (token) {
+								parseddata[gettoken(token)] = &buffer[lasti];
+							}
+
+							lineprocessor(parseddata, obj);
+							buffer_used-=i;
+							memmove(buffer, &buffer[i+1], buffer_used);
+							buffer_used--; // when copying we omitted 1 byte.
+
+							memset(parseddata, 0 , sizeof(parseddata));
+							i = lasti = 0;
+							token=NULL;
+							waitingforclosingquote = foundverb = false;
+							break;
+						case '\t':
+						case ' ':
+							if (!foundverb) { // first word on line
+								buffer[i]='\0';
+								foundverb = true;
+								(parseddata[VERB]) = &buffer[0];
+							}
+
+							else if (!waitingforclosingquote) { // after the first word, everything else forms pairs of token, value.
+								buffer[i]='\0';
+								if (!token) // no token known yet, this word must be a token.
+									token=&buffer[lasti];
+								else { // we already know a token so this word must be a value
+									parseddata[gettoken(token)] = &buffer[lasti];
+									token = NULL;
+								}
+
+							}
+							lasti = i+1;
+							break;
 					}
-					if (stringp == NULL) {
+					if (i >= buffer_used-1) {
 						break; // incomplete line due to INPUT_BUFFER_SIZE_LIMITATION - read some more data, then repeat parsing.
 					}
-					buffer_used--; // when replacing \n with \0 in strsep, the buffer-usage actually shrinks because \0 are not counted by strlen
-
-					if (line) {
-						size_t linelength = strlen(line);
-						if (linelength > 0) {
-							if (!lineprocessor(line, obj) ) {
-								goto out;
-							}
-							buffer_used-=linelength;
-							memmove(buffer, stringp, buffer_used + 1);
-						}
-					}
+					i++;
 				}
 			} else {
 				printf("didn't read anything but no error %i\n", errno);
@@ -274,11 +270,11 @@ int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command) 
 }
 
 
-bool babelhelper_discard_response(char *lineptr, void *object) {
-	return !!strncmp(lineptr, "ok", 2);
+bool babelhelper_discard_response(char **data, void *object) {
+	return (data[OK] == 0);
 }
 
-void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*lineprocessor)(char*, void* object)) {
+void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*lineprocessor)(char**, void* object)) {
 	int sockfd;
 
 	do {
