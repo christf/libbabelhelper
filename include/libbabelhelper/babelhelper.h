@@ -54,8 +54,13 @@
         BABEL_TOKEN(COST)   \
         BABEL_TOKEN(RXCOST)   \
         BABEL_TOKEN(TXCOST)   \
+        BABEL_TOKEN(INSTALLED)   \
+        BABEL_TOKEN(VIA)   \
+        BABEL_TOKEN(REFMETRIC)   \
+        BABEL_TOKEN(ID)   \
         BABEL_TOKEN(IPV6)   \
         BABEL_TOKEN(IPV4)   \
+        BABEL_TOKEN(UREACH)   \
         BABEL_TOKEN(REACH)   \
         BABEL_TOKEN(UP)   \
         BABEL_TOKEN(OK) \
