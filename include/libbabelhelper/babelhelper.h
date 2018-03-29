@@ -82,36 +82,10 @@ static const char *BABEL_TOKEN_STRING[] = {
 #define num_different_tokens UNKNOWN+1
 
 
-struct babelneighbour {
-	char *action;
-	char *address_str;
-	char *ifname;
-	int reach;
-	int rxcost;
-	int txcost;
-	int cost;
-	struct in6_addr address;
-};
-
-struct babelroute{
-	char *action;
-	char *route;
-	char *prefix;
-	char *from;
-	char *id;
-	int metric;
-	int refmetric;
-	char *via;
-	char *ifname;
-	struct in6_addr in6_via;
-};
-
 struct babelhelper_ctx {
 	bool debug;
 };
 
-void babelhelper_babelroute_free_members(struct babelroute *br);
-void babelhelper_babelneighbour_free_members(struct babelneighbour *bn);
 void babelhelper_readbabeldata(struct babelhelper_ctx *ctx, void* object, bool (*lineprocessor)(char**, void* object));
 bool babelhelper_discard_response(char **data, void *object);
 int babelhelper_babel_connect(int port);
