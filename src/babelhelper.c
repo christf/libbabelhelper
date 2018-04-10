@@ -123,69 +123,59 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 	char *parseddata[num_different_tokens];
 	memset(parseddata, 0 , sizeof(parseddata));
 
-	int retval;
 	fd_set rfds;
 	FD_ZERO(&rfds);
 	FD_SET(fd, &rfds);
 	do {
-		struct timeval timeout =  {
-			.tv_sec=2,
-			.tv_usec=0,
-		};
+		realloc_and_compensate_for_move(&buffer, buffer_used + LINEBUFFER_SIZE + 1, (void*)&parseddata, &token);
+		len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
+		buffer[buffer_used+len] = 0; // terminate string appropriately. This will be overwritten if more data is read.
 
-		retval = select(fd+1, &rfds, NULL, NULL, &timeout);
-		if (retval == -1) {
-			perror("Error on select(), reading from babel socket.");
-		} else if (retval) {
-			realloc_and_compensate_for_move(&buffer, buffer_used + LINEBUFFER_SIZE + 1, (void*)&parseddata, &token);
-			len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
-			buffer[buffer_used+len] = 0; // terminate string appropriately. This will be overwritten if more data is read.
+		if ( (len == -1 && errno == EAGAIN) || len == 0) {
+			break;
+		} else if (len > 0 ) {
+			buffer[buffer_used + len] = 0;
+			buffer_used = buffer_used + len;
+			int i=0;
+			while ( buffer_used > 0 ) {
+				switch (buffer[i]) {
+					case '"':
+						waitingforclosingquote = !waitingforclosingquote;
+						break;
+					case '\n':
+					case '\r':
+						buffer[i]='\0';
+						if (!strncmp(buffer, "ok", 2))
+							goto out;
+						if (token) {
+							parseddata[gettoken(token)] = &buffer[lasti];
+						}
 
-			if ( (len == -1 && errno == EAGAIN) || len == 0) {
-				break;
-			} else if (len > 0 ) {
-				buffer[buffer_used + len] = 0;
-				buffer_used = buffer_used + len;
-				int i=0;
-				while ( buffer_used > 0 ) {
-					switch (buffer[i]) {
-						case '"':
-							waitingforclosingquote = !waitingforclosingquote;
-							break;
-						case '\n':
-						case '\r':
+						lineprocessor(parseddata, obj);
+						buffer_used-=i;
+						memmove(buffer, &buffer[i+1], buffer_used);
+						buffer_used--; // when copying we omitted 1 byte.
+
+						memset(parseddata, 0 , sizeof(parseddata));
+						i = lasti = 0;
+						token=NULL;
+						waitingforclosingquote = foundverb = false;
+						break;
+					case '\t':
+					case ' ':
+						if (!foundverb) { // first word on line
 							buffer[i]='\0';
-							if (!strncmp(buffer, "ok", 2))
-								goto out;
-							if (token) {
+							foundverb = true;
+							(parseddata[VERB]) = &buffer[0];
+						}
+
+						else if (!waitingforclosingquote) { // after the first word, everything else forms pairs of token, value.
+							buffer[i]='\0';
+							if (!token) // no token known yet, this word must be a token.
+								token=&buffer[lasti];
+							else { // we already know a token so this word must be a value
 								parseddata[gettoken(token)] = &buffer[lasti];
-							}
-
-							lineprocessor(parseddata, obj);
-							buffer_used-=i;
-							memmove(buffer, &buffer[i+1], buffer_used);
-							buffer_used--; // when copying we omitted 1 byte.
-
-							memset(parseddata, 0 , sizeof(parseddata));
-							i = lasti = 0;
-							token=NULL;
-							waitingforclosingquote = foundverb = false;
-							break;
-						case '\t':
-						case ' ':
-							if (!foundverb) { // first word on line
-								buffer[i]='\0';
-								foundverb = true;
-								(parseddata[VERB]) = &buffer[0];
-							}
-
-							else if (!waitingforclosingquote) { // after the first word, everything else forms pairs of token, value.
-								buffer[i]='\0';
-								if (!token) // no token known yet, this word must be a token.
-									token=&buffer[lasti];
-								else { // we already know a token so this word must be a value
-									parseddata[gettoken(token)] = &buffer[lasti];
-									token = NULL;
+								token = NULL;
 								}
 
 							}
@@ -200,12 +190,6 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 			} else {
 				printf("didn't read anything but no error %i\n", errno);
 			}
-		} else {
-			if (ctx->debug)
-				fprintf(stderr, "No data on babel socket within timeout of %li seconds and %li usecs.\n", timeout.tv_sec, timeout.tv_usec);
-			free(buffer);
-			return false;
-		}
 	} while ( buffer_used > 0 || len > 0 );
 
 out:
@@ -271,7 +255,7 @@ int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command) 
 
 
 bool babelhelper_discard_response(char **data, void *object) {
-	return (data[OK] == 0);
+	return (!!data[OK]);
 }
 
 void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*lineprocessor)(char**, void* object)) {
@@ -284,6 +268,7 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*
 	} while (sockfd < 0);
 
 	// receive and ignore babel header
+	// TODO: implement epoll
 	while ( ! babelhelper_input_pump(ctx, sockfd, NULL, babelhelper_discard_response))
 		fprintf(stderr, "Retrying to skip babel header. Reading from babel socket.\n");
 
@@ -292,11 +277,16 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*
 		fprintf(stderr, "Retrying to send dump-command to babel socket.\n");
 
 	// receive result
+	// TODO implement epoll
 	while ( ! babelhelper_input_pump(ctx, sockfd, object, lineprocessor))
 		fprintf(stderr, "Retrying reading from babel socket.\n");
 
 	close(sockfd);
 	return;
+}
+
+const char *make_sure_we_use_the_string() {
+	return BABEL_TOKEN_STRING[0];
 }
 
 /**
