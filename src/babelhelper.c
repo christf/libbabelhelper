@@ -27,6 +27,9 @@
 #include <libbabelhelper/babelhelper.h>
 #include <sys/time.h>
 #include <ctype.h>
+	static const char *BABEL_TOKEN_STRING[] = {
+		FOREACH_BABEL_TOKEN(GENERATE_STRING)
+	};
 
 bool babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
 	unsigned char buffer[8];
@@ -63,6 +66,7 @@ char *tolower_s(char *str) {
 }
 
 int gettoken(char* token) {
+
 	// TODO: how can we do this more efficiently?
 	for (int i=0;i<num_different_tokens;i++) {
 		char *lowerstring = tolower_s(strdup(BABEL_TOKEN_STRING[i])); 
@@ -129,12 +133,11 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 	do {
 		realloc_and_compensate_for_move(&buffer, buffer_used + LINEBUFFER_SIZE + 1, (void*)&parseddata, &token);
 		len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
-		buffer[buffer_used+len] = 0; // terminate string appropriately. This will be overwritten if more data is read.
 
 		if ( (len == -1 && errno == EAGAIN) || len == 0) {
 			break;
 		} else if (len > 0 ) {
-			buffer[buffer_used + len] = 0;
+			buffer[buffer_used + len] = 0; // terminate string appropriately. This will be overwritten if more data is read.
 			buffer_used = buffer_used + len;
 			int i=0;
 			while ( buffer_used > 0 ) {
@@ -283,10 +286,6 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*
 
 	close(sockfd);
 	return;
-}
-
-const char *make_sure_we_use_the_string() {
-	return BABEL_TOKEN_STRING[0];
 }
 
 /**
