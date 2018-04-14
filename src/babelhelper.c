@@ -126,7 +126,7 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 	int lasti = 0;
 	char *parseddata[num_different_tokens];
 	memset(parseddata, 0 , sizeof(parseddata));
-
+	bool stopreading = false;
 	fd_set rfds;
 	FD_ZERO(&rfds);
 	FD_SET(fd, &rfds);
@@ -148,8 +148,10 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 					case '\n':
 					case '\r':
 						buffer[i]='\0';
-						if (!strncmp(buffer, "ok", 2))
+						if (!strncmp(buffer, "ok", 2)) {
+							stopreading = true;
 							goto out;
+						}
 						if (token) {
 							parseddata[gettoken(token)] = &buffer[lasti];
 						}
@@ -191,13 +193,13 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 					i++;
 				}
 			} else {
-				printf("didn't read anything but no error %i\n", errno);
+				fprintf(stderr, "didn't read anything but no error %i\n", errno);
 			}
 	} while ( buffer_used > 0 || len > 0 );
 
 out:
 	free(buffer);
-	return true;
+	return stopreading;
 }
 
 int babelhelper_babel_connect(int port) {
@@ -263,26 +265,42 @@ bool babelhelper_discard_response(char **data, void *object) {
 
 void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*lineprocessor)(char**, void* object)) {
 	int sockfd;
-
+	fd_set rfds;
+	FD_ZERO(&rfds);
 	do {
 		sockfd = babelhelper_babel_connect(BABEL_PORT);
 		if (sockfd < 0)
 			fprintf(stderr, "Connecting to babel socket failed. Retrying.\n");
 	} while (sockfd < 0);
 
+	FD_SET(sockfd, &rfds);
+
 	// receive and ignore babel header
-	// TODO: implement epoll
-	while ( ! babelhelper_input_pump(ctx, sockfd, NULL, babelhelper_discard_response))
-		fprintf(stderr, "Retrying to skip babel header. Reading from babel socket.\n");
+	while (true) {
+		if ( babelhelper_input_pump(ctx, sockfd, NULL, babelhelper_discard_response))
+			break;
+
+		if (select(sockfd +1, &rfds, NULL, NULL, NULL) < 0) {
+			perror("select:");
+		};
+	}
 
 	// query babel data
 	while ( babelhelper_sendcommand(ctx, sockfd, "dump\n") != 5 )
 		fprintf(stderr, "Retrying to send dump-command to babel socket.\n");
 
+	FD_ZERO(&rfds);
+	FD_SET(sockfd, &rfds);
+
 	// receive result
-	// TODO implement epoll
-	while ( ! babelhelper_input_pump(ctx, sockfd, object, lineprocessor))
-		fprintf(stderr, "Retrying reading from babel socket.\n");
+	while (true) {
+		if ( babelhelper_input_pump(ctx, sockfd, object, lineprocessor))
+			break;
+
+		if (select(sockfd +1, &rfds, NULL, NULL, NULL) < 0) {
+			perror("select:");
+		};
+	}
 
 	close(sockfd);
 	return;
