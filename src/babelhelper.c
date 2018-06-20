@@ -247,6 +247,7 @@ int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command) 
 	else if (retval) {
 		while (send(fd, command, cmdlen, 0) != cmdlen) {
 			perror("Select said the babel socket is ready for writing but we received an error while sending command %s to babel. This should not happen. Retrying.");
+			return 0;
 		}
 	}
 	else {
@@ -286,8 +287,10 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*
 	}
 
 	// query babel data
-	while ( babelhelper_sendcommand(ctx, sockfd, "dump\n") != 5 )
+	if ( babelhelper_sendcommand(ctx, sockfd, "dump\n") != 5 ) {
 		fprintf(stderr, "Retrying to send dump-command to babel socket.\n");
+		goto cleanup;
+	}
 
 	FD_ZERO(&rfds);
 	FD_SET(sockfd, &rfds);
@@ -302,6 +305,7 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*
 		};
 	}
 
+cleanup:
 	close(sockfd);
 	return;
 }
