@@ -27,9 +27,10 @@
 #include <libbabelhelper/babelhelper.h>
 #include <sys/time.h>
 #include <ctype.h>
-	static const char *BABEL_TOKEN_STRING[] = {
-		FOREACH_BABEL_TOKEN(GENERATE_STRING)
-	};
+
+static const char *BABEL_TOKEN_STRING[] = {
+	FOREACH_BABEL_TOKEN(GENERATE_STRING)
+};
 
 bool babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
 	unsigned char buffer[8];
@@ -242,12 +243,14 @@ int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command) 
 
 	int retval = select(fd+1, NULL, &wfds, NULL, &timeout);
 
-	if (retval == -1)
+	if (retval == -1) {
 		perror("select()");
+		return 0;
+	}
 	else if (retval) {
 		while (send(fd, command, cmdlen, 0) != cmdlen) {
 			perror("Select said the babel socket is ready for writing but we received an error while sending command %s to babel. This should not happen. Retrying.");
-			return 0;
+			usleep(500000);
 		}
 	}
 	else {
@@ -270,8 +273,10 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*
 	FD_ZERO(&rfds);
 	do {
 		sockfd = babelhelper_babel_connect(BABEL_PORT);
-		if (sockfd < 0)
+		if (sockfd < 0) {
 			fprintf(stderr, "Connecting to babel socket failed. Retrying.\n");
+			usleep(1000000);
+		}
 	} while (sockfd < 0);
 
 	FD_SET(sockfd, &rfds);
@@ -289,7 +294,7 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*
 	// query babel data
 	if ( babelhelper_sendcommand(ctx, sockfd, "dump\n") != 5 ) {
 		fprintf(stderr, "Retrying to send dump-command to babel socket.\n");
-		goto cleanup;
+		usleep(1000000);
 	}
 
 	FD_ZERO(&rfds);
@@ -302,6 +307,7 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*
 
 		if (select(sockfd +1, &rfds, NULL, NULL, NULL) < 0) {
 			perror("select:");
+			goto cleanup;
 		};
 	}
 
