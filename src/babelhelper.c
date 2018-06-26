@@ -137,6 +137,8 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 
 		if ( (len == -1 && errno == EAGAIN) || len == 0) {
 			break;
+		} else if (len < 0 && errno > 0 ) {
+			perror("error when reading from babel socket");
 		} else if (len > 0 ) {
 			buffer[buffer_used + len] = 0; // terminate string appropriately. This will be overwritten if more data is read.
 			buffer_used = buffer_used + len;
@@ -193,7 +195,7 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 					}
 					i++;
 				}
-			} else {
+			} else if (len == 0 ) {
 				fprintf(stderr, "didn't read anything but no error %i\n", errno);
 			}
 	} while ( buffer_used > 0 || len > 0 );
@@ -205,6 +207,8 @@ out:
 
 int babelhelper_babel_connect(int port) {
 	int sockfd ;
+	fd_set rfds;
+	FD_ZERO(&rfds);
 
 	struct sockaddr_in6 serv_addr = {
 		.sin6_family = AF_INET6,
@@ -216,6 +220,7 @@ int babelhelper_babel_connect(int port) {
 		perror("ERROR opening socket");
 		return -1;
 	}
+	FD_SET(sockfd, &rfds);
 	if (inet_pton(AF_INET6, "::1", &serv_addr.sin6_addr.s6_addr) != 1)
 	{
 		perror("Cannot parse hostname");
@@ -224,10 +229,33 @@ int babelhelper_babel_connect(int port) {
 	if (connect(sockfd, (const struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0) {
 		if (errno != EINPROGRESS) {
 			perror("Can not connect to babeld");
-			return -1;
+			goto errorout;
+		} else {
+			struct timeval timeout =  {
+				.tv_sec=5,
+				.tv_usec=0,
+			};
+			if (select(sockfd +1, NULL, &rfds, NULL, &timeout) < 0) {
+				perror("error on select when connecting to babel socket");
+				goto errorout;
+			} else {
+				socklen_t len = sizeof(errno);
+
+				if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &errno, &len) < 0)
+					goto errorout;
+
+				if (errno == 0 )
+					return sockfd;
+
+				perror("Could not connect");
+				goto errorout;
+			}
 		}
 	}
 	return sockfd;
+errorout:
+	close(sockfd);
+	return -1;
 }
 
 int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command) {
@@ -294,7 +322,7 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*
 	// query babel data
 	if ( babelhelper_sendcommand(ctx, sockfd, "dump\n") != 5 ) {
 		fprintf(stderr, "Retrying to send dump-command to babel socket.\n");
-		usleep(1000000);
+		goto cleanup;
 	}
 
 	FD_ZERO(&rfds);
