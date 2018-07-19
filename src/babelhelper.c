@@ -127,16 +127,20 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 	int lasti = 0;
 	char *parseddata[num_different_tokens];
 	memset(parseddata, 0 , sizeof(parseddata));
-	bool stopreading = false;
-	fd_set rfds;
-	FD_ZERO(&rfds);
-	FD_SET(fd, &rfds);
+	bool exit_success = false;
+//	fd_set rfds;
+//	FD_ZERO(&rfds);
+//	FD_SET(fd, &rfds);
 	do {
 		realloc_and_compensate_for_move(&buffer, buffer_used + LINEBUFFER_SIZE + 1, (void*)&parseddata, &token);
 		len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
 
-		if ( (len == -1 && errno == EAGAIN) || len == 0) {
+		if ( (len == -1 && errno == EAGAIN) ) {
+			exit_success = true; // no more data, 
 			break;
+		}
+		else if ( len == 0 ) {
+			break; // end of file - we should re-connect
 		} else if (len < 0 && errno > 0 ) {
 			perror("error when reading from babel socket");
 		} else if (len > 0 ) {
@@ -152,7 +156,7 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 					case '\r':
 						buffer[i]='\0';
 						if (!strncmp(buffer, "ok", 2)) {
-							stopreading = true;
+							exit_success = true;
 							goto out;
 						}
 						if (token) {
@@ -187,7 +191,7 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 								}
 
 							}
-							lasti = i+1;
+							lasti = i + 1;
 							break;
 					}
 					if (i >= buffer_used-1) {
@@ -202,7 +206,7 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 
 out:
 	free(buffer);
-	return stopreading;
+	return exit_success;
 }
 
 int babelhelper_babel_connect(int port) {
