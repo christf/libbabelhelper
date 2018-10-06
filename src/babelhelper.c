@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2017,2018 Christof Schulze <christof.schulze@gmx.net>
+   Copyright (c) 2017,2018 Christof Schulze <christof@christofschulze.com>
    All rights reserved.
 
    Redistribution and use in source and binary forms, with or without
@@ -128,15 +128,13 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 	char *parseddata[num_different_tokens];
 	memset(parseddata, 0 , sizeof(parseddata));
 	bool exit_success = false;
-//	fd_set rfds;
-//	FD_ZERO(&rfds);
-//	FD_SET(fd, &rfds);
+
 	do {
 		realloc_and_compensate_for_move(&buffer, buffer_used + LINEBUFFER_SIZE + 1, (void*)&parseddata, &token);
 		len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
 
 		if ( (len == -1 && errno == EAGAIN) ) {
-			exit_success = true; // no more data, 
+			exit_success = false; // no more data for now, we have not received the finishing "ok\n" yet so there must be more
 			break;
 		}
 		else if ( len == 0 ) {
