@@ -117,7 +117,7 @@ void realloc_and_compensate_for_move(char **buffer, size_t newsize, char **babel
  * for babel tokens in one single loop
  * It will return an array of char* to each token
  */
-bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool (*lineprocessor)(char** babeldata, void* object)) {
+int babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool (*lineprocessor)(char** babeldata, void* object)) {
 	char *buffer = NULL;
 	size_t buffer_used = 0;
 	ssize_t len = 0;
@@ -127,19 +127,21 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 	int lasti = 0;
 	char *parseddata[num_different_tokens];
 	memset(parseddata, 0 , sizeof(parseddata));
-	bool exit_success = false;
+	int exit_code = 0;
 
 	do {
 		realloc_and_compensate_for_move(&buffer, buffer_used + LINEBUFFER_SIZE + 1, (void*)&parseddata, &token);
 		len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
 
 		if ( (len == -1 && errno == EAGAIN) ) {
-			exit_success = false; // no more data for now, we have not received the finishing "ok\n" yet so there must be more
+			exit_code = 0; // no more data for now, we have not received the finishing "ok\n" yet so there must be more
 			break;
 		}
 		else if ( len == 0 ) {
-			break; // end of file - we should re-connect
+			exit_code = -1;
+			break; // end of file - not sure why this would happen - in any case, we should re-connect
 		} else if (len < 0 && errno > 0 ) {
+			exit_code = -2;
 			perror("error when reading from babel socket");
 		} else if (len > 0 ) {
 			buffer[buffer_used + len] = 0; // terminate string appropriately. This will be overwritten if more data is read.
@@ -154,7 +156,7 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 					case '\r':
 						buffer[i]='\0';
 						if (!strncmp(buffer, "ok", 2)) {
-							exit_success = true;
+							exit_code = 1;
 							goto out;
 						}
 						if (token) {
@@ -186,25 +188,23 @@ bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, boo
 							else { // we already know a token so this word must be a value
 								parseddata[gettoken(token)] = &buffer[lasti];
 								token = NULL;
-								}
-
 							}
-							lasti = i + 1;
-							break;
-					}
-					if (i >= buffer_used-1) {
-						break; // incomplete line due to INPUT_BUFFER_SIZE_LIMITATION - read some more data, then repeat parsing.
-					}
-					i++;
+
+						}
+						lasti = i + 1;
+						break;
 				}
-			} else if (len == 0 ) {
-				fprintf(stderr, "didn't read anything but no error %i\n", errno);
+				if (i >= buffer_used-1) {
+					break; // incomplete line due to INPUT_BUFFER_SIZE_LIMITATION - read some more data, then repeat parsing.
+				}
+				i++;
 			}
+		}
 	} while ( buffer_used > 0 || len > 0 );
 
 out:
 	free(buffer);
-	return exit_success;
+	return exit_code;
 }
 
 int babelhelper_babel_connect(int port) {

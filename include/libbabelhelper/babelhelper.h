@@ -86,7 +86,7 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx, void* object, bool (
 bool babelhelper_discard_response(char **data, void *object);
 int babelhelper_babel_connect(int port);
 int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command); 
-bool babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd, void *object, bool (*lineprocessor)(char**, void* object));
+int babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd, void *object, bool (*lineprocessor)(char**, void* object));
 void printrecognized(char **data);
 
 bool babelhelper_generateip(char *result,const unsigned char *mac, const char *prefix);
