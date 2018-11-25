@@ -27,10 +27,21 @@
 #include <libbabelhelper/babelhelper.h>
 #include <sys/time.h>
 #include <ctype.h>
+#include <stdarg.h>
+
 
 static const char *BABEL_TOKEN_STRING[] = {
 	FOREACH_BABEL_TOKEN(GENERATE_STRING)
 };
+
+void log_debug(struct babelhelper_ctx *ctx, const char *format, ...) {
+	if (!ctx->debug)
+		return;
+	va_list args;
+	va_start(args, format);
+	vfprintf(stderr, format, args);
+	va_end(args);
+}
 
 bool babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
 	unsigned char buffer[8];
@@ -115,7 +126,7 @@ void realloc_and_compensate_for_move(char **buffer, size_t newsize, char **babel
 
 /* this will read data from a nonblocking socket, and parse this line-wise and
  * for babel tokens in one single loop
- * It will return an array of char* to each token
+ * It will return 0 if there is no more data, a negative value on error
  */
 int babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool (*lineprocessor)(char** babeldata, void* object)) {
 	char *buffer = NULL;
@@ -134,18 +145,22 @@ int babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool
 		len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
 
 		if ( (len == -1 && errno == EAGAIN) ) {
+			log_debug(ctx, "EAGAIN and len = -1\n");
 			exit_code = 0; // no more data for now, we have not received the finishing "ok\n" yet so there must be more
 			break;
 		}
 		else if ( len == 0 ) {
+			log_debug(ctx, "len = 0 - man read says this means EOF on socket\n");
 			exit_code = -1;
 			break; // end of file - not sure why this would happen - in any case, we should re-connect
-		} else if (len < 0 && errno > 0 ) {
+		} else if (len < 0 && errno != 0 ) {
+			log_debug(ctx, "len < 0 - and errno != 0\n");
 			exit_code = -2;
 			perror("error when reading from babel socket");
 		} else if (len > 0 ) {
 			buffer[buffer_used + len] = 0; // terminate string appropriately. This will be overwritten if more data is read.
 			buffer_used = buffer_used + len;
+			log_debug(ctx, "len > 0 - and errno == 0, used: %d, buffer = %s\n", buffer_used, buffer);
 			int i=0;
 			while ( buffer_used > 0 ) {
 				switch (buffer[i]) {
@@ -195,7 +210,7 @@ int babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool
 						break;
 				}
 				if (i >= buffer_used-1) {
-					break; // incomplete line due to INPUT_BUFFER_SIZE_LIMITATION - read some more data, then repeat parsing.
+					break; // incomplete line due to LINEBUFFER_SIZE LIMITATION - read some more data, then repeat parsing.
 				}
 				i++;
 			}
@@ -209,8 +224,6 @@ out:
 
 int babelhelper_babel_connect(int port) {
 	int sockfd ;
-	fd_set rfds;
-	FD_ZERO(&rfds);
 
 	struct sockaddr_in6 serv_addr = {
 		.sin6_family = AF_INET6,
@@ -222,22 +235,25 @@ int babelhelper_babel_connect(int port) {
 		perror("ERROR opening socket");
 		return -1;
 	}
-	FD_SET(sockfd, &rfds);
 	if (inet_pton(AF_INET6, "::1", &serv_addr.sin6_addr.s6_addr) != 1)
 	{
-		perror("Cannot parse hostname");
+		perror("Cannot parse hostname"); // this will never happen.
 		return -1;
 	}
 	if (connect(sockfd, (const struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0) {
 		if (errno != EINPROGRESS) {
 			perror("Can not connect to babeld");
 			goto errorout;
-		} else {
+		} else { // could not connect, but EINPROGRESS
 			struct timeval timeout =  {
 				.tv_sec=5,
 				.tv_usec=0,
 			};
-			if (select(sockfd +1, NULL, &rfds, NULL, &timeout) < 0) {
+
+			fd_set wfds;
+			FD_ZERO(&wfds);
+			FD_SET(sockfd, &wfds);
+			if (select(sockfd +1, NULL, &wfds, NULL, &timeout) < 0) {
 				perror("error on select when connecting to babel socket");
 				goto errorout;
 			} else {
@@ -284,8 +300,7 @@ int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command) 
 		}
 	}
 	else {
-		if (ctx->debug)
-			fprintf(stderr, "could not write command to babel socket within 5 seconds.\n");
+		log_debug(ctx, "could not write command to babel socket within 5 seconds.\n");
 		return 0;
 	}
 
