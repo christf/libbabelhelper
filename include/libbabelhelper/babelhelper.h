@@ -82,7 +82,7 @@ struct babelhelper_ctx {
 	bool debug;
 };
 
-void babelhelper_readbabeldata(struct babelhelper_ctx *ctx, void* object, bool (*lineprocessor)(char**, void* object));
+void babelhelper_readbabeldata(struct babelhelper_ctx *ctx, char *command, void* object, bool (*lineprocessor)(char**, void* object));
 bool babelhelper_discard_response(char **data, void *object);
 int babelhelper_babel_connect(int port);
 int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command); 

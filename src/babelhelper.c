@@ -316,8 +316,10 @@ bool babelhelper_discard_response(char **data, void *object) {
 	return (!!data[OK]);
 }
 
-void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*lineprocessor)(char**, void* object)) {
+void babelhelper_readbabeldata(struct babelhelper_ctx *ctx, char *command, void *object, bool (*lineprocessor)(char**, void* object)) {
 	int sockfd;
+	char _command[strlen(command) + 2];
+	snprintf(_command, sizeof(_command), "%s\n", command);
 	fd_set rfds;
 	FD_ZERO(&rfds);
 	do {
@@ -341,7 +343,7 @@ void babelhelper_readbabeldata(struct babelhelper_ctx *ctx,void *object, bool (*
 	}
 
 	// query babel data
-	if ( babelhelper_sendcommand(ctx, sockfd, "dump\n") != 5 ) {
+	if ( babelhelper_sendcommand(ctx, sockfd, _command) != strlen(_command) ) {
 		fprintf(stderr, "Retrying to send dump-command to babel socket.\n");
 		goto cleanup;
 	}
