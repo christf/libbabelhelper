@@ -164,7 +164,7 @@ int babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool
 		} else if (len > 0 ) {
 			buffer[buffer_used + len] = 0; // terminate string appropriately. This will be overwritten if more data is read.
 			buffer_used = buffer_used + len;
-			log_debug(ctx, "len > 0 - and errno == 0, used: %d, buffer = %s\n", buffer_used, buffer);
+			log_debug(ctx, "len > 0 - and errno == 0, used: %zd, buffer = %s\n", buffer_used, buffer);
 			int i=0;
 			while ( buffer_used > 0 ) {
 				switch (buffer[i]) {
