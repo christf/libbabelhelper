@@ -28,7 +28,7 @@
 #include <sys/time.h>
 #include <ctype.h>
 #include <stdarg.h>
-
+#include <sys/select.h>
 
 static const char *BABEL_TOKEN_STRING[] = {
 	FOREACH_BABEL_TOKEN(GENERATE_STRING)
