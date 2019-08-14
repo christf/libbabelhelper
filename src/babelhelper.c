@@ -124,9 +124,13 @@ void realloc_and_compensate_for_move(char **buffer, size_t newsize, char **babel
 		*token += (*buffer - oldpointer);
 }
 
-/* this will read data from a nonblocking socket, and parse this line-wise and
+/* this will read data from a nonblocking socket, and parse this line-wise
  * for babel tokens in one single loop
- * It will return 0 if there is no more data, a negative value on error
+ * It will return:
+ *   -1 on babel socket close
+ *   -2 on other error
+ *   0 if there is no more data
+ *   1  after "ok\n" was read.
  */
 int babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool (*lineprocessor)(char** babeldata, void* object)) {
 	char *buffer = NULL;
