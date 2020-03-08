@@ -23,3 +23,7 @@ install(FILES ${LIBBABELHELPER_BINARY_DIR}/libbabelhelper.pc DESTINATION "${LIBD
 FILE(GLOB include_files "${CMAKE_CURRENT_SOURCE_DIR}/include/libbabelhelper/*.h")
 install(FILES ${include_files} DESTINATION "include/libbabelhelper-${PROJECT_VERSION}/libbabelhelper")
 
+add_custom_target(format
+        find src include -type f -name '*.[ch]' | xargs clang-format -i --style=file
+        WORKING_DIRECTORY ${LIBBABELHELPER_SOURCE_DIR}
+)
