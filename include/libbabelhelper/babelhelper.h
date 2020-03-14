@@ -1,5 +1,6 @@
 /*
    Copyright (c) 2017, Christof Schulze <christof.schulze@gmx.net>
+   Copyright (c) 2020, Matthias Schiffer <mschiffer@universe-factory.net>
    All rights reserved.
 
    Redistribution and use in source and binary forms, with or without
@@ -25,70 +26,77 @@
 
 #pragma once
 
-#include <stdio.h>
-#include <string.h>
-#include <netdb.h>
-#include "errno.h"
-#include <arpa/inet.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <stdbool.h>
+#include <stddef.h>
 
 
 #define BABEL_PORT 33123
-#define LINEBUFFER_SIZE 256
-#define TRACE {printf("%s: %d\n", __FILE__, __LINE__);};
 
 
-#define FOREACH_BABEL_TOKEN(BABEL_TOKEN) \
-        BABEL_TOKEN(VERB)   \
-        BABEL_TOKEN(XROUTE)  \
-        BABEL_TOKEN(INTERFACE)   \
-        BABEL_TOKEN(ROUTE)   \
-        BABEL_TOKEN(NEIGHBOUR)   \
-        BABEL_TOKEN(ADDRESS)   \
-        BABEL_TOKEN(IF)   \
-        BABEL_TOKEN(PREFIX)   \
-        BABEL_TOKEN(FROM)   \
-        BABEL_TOKEN(METRIC)   \
-        BABEL_TOKEN(COST)   \
-        BABEL_TOKEN(RXCOST)   \
-        BABEL_TOKEN(TXCOST)   \
-        BABEL_TOKEN(INSTALLED)   \
-        BABEL_TOKEN(VIA)   \
-        BABEL_TOKEN(REFMETRIC)   \
-        BABEL_TOKEN(ID)   \
-        BABEL_TOKEN(IPV6)   \
-        BABEL_TOKEN(IPV4)   \
-        BABEL_TOKEN(UREACH)   \
-        BABEL_TOKEN(REACH)   \
-        BABEL_TOKEN(UP)   \
-        BABEL_TOKEN(OK) \
-        BABEL_TOKEN(UNKNOWN)
+typedef enum babel_event_type {
+	BABEL_EVENT_UNKNOWN = -1,
+	BABEL_EVENT_FLUSH,
+	BABEL_EVENT_ADD,
+	BABEL_EVENT_CHANGE,
+} babel_event_type_t;
 
-#define GENERATE_ENUM(ENUM) ENUM,
-#define GENERATE_STRING(STRING) #STRING,
-enum BABEL_TOKEN_ENUM {
-    FOREACH_BABEL_TOKEN(GENERATE_ENUM)
+typedef enum babel_object_type {
+	BABEL_OBJECT_UNKNOWN = -1,
+	BABEL_OBJECT_INTERFACE,
+	BABEL_OBJECT_NEIGHBOUR,
+	BABEL_OBJECT_XROUTE,
+	BABEL_OBJECT_ROUTE,
+} babel_object_type_t;
+
+typedef enum babel_param_type {
+	BABEL_PARAM_UP,
+	BABEL_PARAM_IPV4,
+	BABEL_PARAM_IPV6,
+	BABEL_PARAM_ADDRESS,
+	BABEL_PARAM_IF,
+	BABEL_PARAM_REACH,
+	BABEL_PARAM_UREACH,
+	BABEL_PARAM_RXCOST,
+	BABEL_PARAM_TXCOST,
+	BABEL_PARAM_COST,
+	BABEL_PARAM_PREFIX,
+	BABEL_PARAM_FROM,
+	BABEL_PARAM_METRIC,
+	BABEL_PARAM_INSTALLED,
+	BABEL_PARAM_ID,
+	BABEL_PARAM_REFMETRIC,
+	BABEL_PARAM_VIA,
+	/* _COUNT must always be orderd last */
+	BABEL_PARAM__COUNT,
+} babel_param_type_t;
+
+typedef struct babel_event {
+	babel_event_type_t type;
+	babel_object_type_t object_type;
+	const char *object;
+	const char *params[BABEL_PARAM__COUNT];
+} babel_event_t;
+
+
+enum { BABEL_ERR = -1,
+       BABEL_CONTINUE = 0,
+       BABEL_OK = 1,
 };
 
-#define str(x) #x
-#define xstr(x) str(x)
 
-#define num_different_tokens UNKNOWN+1
+/* Definition of babel_ctx is hidden, so it doesn't become part of the public
+ * interface of libbabelhelper */
+typedef struct babel_ctx babel_ctx_t;
 
 
-struct babelhelper_ctx {
-	bool debug;
-};
+babel_ctx_t *babel_open(int port);
+void babel_close(babel_ctx_t *babel);
 
-void babelhelper_readbabeldata(struct babelhelper_ctx *ctx, char *command, void* object, bool (*lineprocessor)(char**, void* object));
-bool babelhelper_discard_response(char **data, void *object);
-int babelhelper_babel_connect(int port);
-int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command); 
-int babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd, void *object, bool (*lineprocessor)(char**, void* object));
-void printrecognized(char **data);
+int babel_write_line(babel_ctx_t *babel, const char *str);
+const char *babel_read_line(babel_ctx_t *babel);
 
-bool babelhelper_generateip(char *result,const unsigned char *mac, const char *prefix);
-bool babelhelper_generateip_str(char *result,const char *strmac, const char *prefix);
-bool babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6);
+/* Pass _COUNT to allow future extensions without breaking ABI */
+int babel_read_event_(babel_ctx_t *babel, babel_event_t *event, size_t n_params);
+
+static inline int babel_read_event(babel_ctx_t *babel, babel_event_t *event) {
+	return babel_read_event_(babel, event, BABEL_PARAM__COUNT);
+}
