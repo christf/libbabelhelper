@@ -1,5 +1,6 @@
 /*
-   Copyright (c) 2017,2018 Christof Schulze <christof@christofschulze.com>
+   Copyright (c) 2017, 2018 Christof Schulze <christof@christofschulze.com>
+   Copyright (c) 2020, Matthias Schiffer <mschiffer@universe-factory.net>
    All rights reserved.
 
    Redistribution and use in source and binary forms, with or without
@@ -23,377 +24,203 @@
    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    */
 
+#include "../include/libbabelhelper/babelhelper.h"
 
-#include <libbabelhelper/babelhelper.h>
-#include <sys/time.h>
-#include <ctype.h>
-#include <stdarg.h>
-#include <sys/select.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
-static const char *BABEL_TOKEN_STRING[] = {
-	FOREACH_BABEL_TOKEN(GENERATE_STRING)
+
+#define BABEL_ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
+
+
+struct babel_ctx {
+	FILE *stream;
+
+	size_t n;
+	char *line;
 };
 
-void log_debug(struct babelhelper_ctx *ctx, const char *format, ...) {
-	if (!ctx->debug)
-		return;
-	va_list args;
-	va_start(args, format);
-	vfprintf(stderr, format, args);
-	va_end(args);
-}
 
-bool babelhelper_generateip(char *result, const unsigned char *mac, const char *prefix){
-	unsigned char buffer[8];
-	struct in6_addr dst = {};
-
-	if (! inet_pton(AF_INET6, prefix, &(dst.s6_addr))) {
-		fprintf(stderr, "inet_pton failed in babelhelper_generateip on address %s.\n",prefix);
-		return false;
-	}
-
-	memcpy(buffer,mac,3);
-	buffer[3]=0xff;
-	buffer[4]=0xfe;
-	memcpy(&(buffer[5]),&(mac[3]),3);
-	buffer[0] ^= 1 << 1;
-
-	memcpy(&(dst.s6_addr[8]), buffer, 8);
-	inet_ntop(AF_INET6, &(dst.s6_addr), result, INET6_ADDRSTRLEN);
-
-	return true;
-}
-
-bool babelhelper_generateip_str(char *result,const char *stringmac, const char *prefix) {
-	unsigned char mac[6];
-	sscanf(stringmac, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &(mac[0]), &(mac[1]), &(mac[2]), &(mac[3]), &(mac[4]), &(mac[5]));
-	return babelhelper_generateip(result, mac, prefix);
-}
-
-char *tolower_s(char *str) {
-	for(int i = 0; str[i]; i++){
-		str[i] = tolower(str[i]);
-	}
-	return str;
-}
-
-int gettoken(char* token) {
-
-	// TODO: how can we do this more efficiently?
-	for (int i=0;i<num_different_tokens;i++) {
-		char *lowerstring = tolower_s(strdup(BABEL_TOKEN_STRING[i])); 
-		if (!strncmp(token, lowerstring, strlen(BABEL_TOKEN_STRING[i])) ) {
-			free(lowerstring);
-			return i;
-		}
-		free(lowerstring);
-	}
-	return UNKNOWN;
-}
-
-void printifdefined(int token, char **babeldata) {
-	if (babeldata[token] && *babeldata[token])
-		printf("%s: %s ", BABEL_TOKEN_STRING[token], babeldata[token]);
-}
-
-void printrecognized(char** babeldata){
-	printf("parsed babeld-line contained the following known tokens: ");
-	for (int i=0;i<num_different_tokens;i++)
-		printifdefined(i, babeldata);
-	printf("\n");
-}
-
-/* reallocates the buffer an shifts all the pointers addresses that are used
- * for the line parser
- * */
-void realloc_and_compensate_for_move(char **buffer, size_t newsize, char **babeldata, char **token ) {
-
-	char *oldpointer = *buffer;
-
-	*buffer = realloc(*buffer, newsize);
-	if (buffer == NULL) {
-		perror("Cannot allocate buffer");
-		exit(1);
-	}
-
-	for (int i=0;i<num_different_tokens;i++) {// compensate already found addresses for words for new position due to buffer realloc 
-		if (babeldata[i])
-			babeldata[i] += (*buffer - oldpointer);
-	}
-	if (*token)
-		*token += (*buffer - oldpointer);
-}
-
-/* this will read data from a nonblocking socket, and parse this line-wise
- * for babel tokens in one single loop
- * It will return:
- *   -1 on babel socket close
- *   -2 on other error
- *   0 if there is no more data
- *   1  after "ok\n" was read.
- */
-int babelhelper_input_pump(struct babelhelper_ctx *ctx, int fd,  void* obj, bool (*lineprocessor)(char** babeldata, void* object)) {
-	char *buffer = NULL;
-	size_t buffer_used = 0;
-	ssize_t len = 0;
-	bool waitingforclosingquote=false;
-	bool foundverb = false;
-	char *token = NULL;
-	int lasti = 0;
-	char *parseddata[num_different_tokens];
-	memset(parseddata, 0 , sizeof(parseddata));
-	int exit_code = 0;
-
-	do {
-		realloc_and_compensate_for_move(&buffer, buffer_used + LINEBUFFER_SIZE + 1, (void*)&parseddata, &token);
-		len = read(fd, buffer + buffer_used, LINEBUFFER_SIZE);
-
-		if ( (len == -1 && errno == EAGAIN) ) {
-			log_debug(ctx, "EAGAIN and len = -1\n");
-			exit_code = 0; // no more data for now, we have not received the finishing "ok\n" yet so there must be more
-			break;
-		}
-		else if ( len == 0 ) {
-			log_debug(ctx, "len = 0 - man read says this means EOF on socket\n");
-			exit_code = -1;
-			break; // end of file - not sure why this would happen - in any case, we should re-connect
-		} else if (len < 0 && errno != 0 ) {
-			log_debug(ctx, "len < 0 - and errno != 0\n");
-			exit_code = -2;
-			perror("error when reading from babel socket");
-		} else if (len > 0 ) {
-			buffer[buffer_used + len] = 0; // terminate string appropriately. This will be overwritten if more data is read.
-			buffer_used = buffer_used + len;
-			log_debug(ctx, "len > 0 - and errno == 0, used: %zd, buffer = %s\n", buffer_used, buffer);
-			int i=0;
-			while ( buffer_used > 0 ) {
-				switch (buffer[i]) {
-					case '"':
-						waitingforclosingquote = !waitingforclosingquote;
-						break;
-					case '\n':
-					case '\r':
-						buffer[i]='\0';
-						if (!strncmp(buffer, "ok", 2)) {
-							exit_code = 1;
-							goto out;
-						}
-						if (token) {
-							parseddata[gettoken(token)] = &buffer[lasti];
-						}
-
-						lineprocessor(parseddata, obj);
-						buffer_used-=i;
-						memmove(buffer, &buffer[i+1], buffer_used);
-						buffer_used--; // when copying we omitted 1 byte.
-
-						memset(parseddata, 0 , sizeof(parseddata));
-						i = lasti = 0;
-						token=NULL;
-						waitingforclosingquote = foundverb = false;
-						break;
-					case '\t':
-					case ' ':
-						if (!foundverb) { // first word on line
-							buffer[i]='\0';
-							foundverb = true;
-							(parseddata[VERB]) = &buffer[0];
-						}
-
-						else if (!waitingforclosingquote) { // after the first word, everything else forms pairs of token, value.
-							buffer[i]='\0';
-							if (!token) // no token known yet, this word must be a token.
-								token=&buffer[lasti];
-							else { // we already know a token so this word must be a value
-								parseddata[gettoken(token)] = &buffer[lasti];
-								token = NULL;
-							}
-
-						}
-						lasti = i + 1;
-						break;
-				}
-				if (i >= buffer_used-1) {
-					break; // incomplete line due to LINEBUFFER_SIZE LIMITATION - read some more data, then repeat parsing.
-				}
-				i++;
-			}
-		}
-	} while ( buffer_used > 0 || len > 0 );
-
-out:
-	free(buffer);
-	return exit_code;
-}
-
-int babelhelper_babel_connect(int port) {
-	int sockfd ;
-
-	struct sockaddr_in6 serv_addr = {
-		.sin6_family = AF_INET6,
-		.sin6_port = htons(port)
-	};
-
-	sockfd = socket(AF_INET6, SOCK_STREAM | SOCK_NONBLOCK, 0);
-	if (sockfd < 0) {
-		perror("ERROR opening socket");
-		return -1;
-	}
-	if (inet_pton(AF_INET6, "::1", &serv_addr.sin6_addr.s6_addr) != 1)
-	{
-		perror("Cannot parse hostname"); // this will never happen.
-		return -1;
-	}
-	if (connect(sockfd, (const struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0) {
-		if (errno != EINPROGRESS) {
-			perror("Can not connect to babeld");
-			goto errorout;
-		} else { // could not connect, but EINPROGRESS
-			struct timeval timeout =  {
-				.tv_sec=5,
-				.tv_usec=0,
-			};
-
-			fd_set wfds;
-			FD_ZERO(&wfds);
-			FD_SET(sockfd, &wfds);
-			if (select(sockfd +1, NULL, &wfds, NULL, &timeout) < 0) {
-				perror("error on select when connecting to babel socket");
-				goto errorout;
-			} else {
-				socklen_t len = sizeof(errno);
-
-				if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &errno, &len) < 0)
-					goto errorout;
-
-				if (errno == 0 )
-					return sockfd;
-
-				perror("Could not connect");
-				goto errorout;
-			}
-		}
-	}
-	return sockfd;
-errorout:
-	close(sockfd);
-	return -1;
-}
-
-int babelhelper_sendcommand(struct babelhelper_ctx *ctx, int fd, char *command) {
-	int cmdlen = strlen(command);
-	fd_set wfds;
-	FD_ZERO(&wfds);
-	FD_SET(fd, &wfds);
-
-	struct timeval timeout =  {
-		.tv_sec=5,
-		.tv_usec=0,
-	};
-
-	int retval = select(fd+1, NULL, &wfds, NULL, &timeout);
-
-	if (retval == -1) {
-		perror("select()");
-		return 0;
-	}
-	else if (retval) {
-		while (send(fd, command, cmdlen, 0) != cmdlen) {
-			perror("Select said the babel socket is ready for writing but we received an error while sending command %s to babel. This should not happen. Retrying.");
-			usleep(500000);
-		}
-	}
-	else {
-		log_debug(ctx, "could not write command to babel socket within 5 seconds.\n");
-		return 0;
-	}
-
-	return cmdlen;
-}
-
-
-bool babelhelper_discard_response(char **data, void *object) {
-	return (!!data[OK]);
-}
-
-void babelhelper_readbabeldata(struct babelhelper_ctx *ctx, char *command, void *object, bool (*lineprocessor)(char**, void* object)) {
-	int sockfd;
-	char _command[strlen(command) + 2];
-	snprintf(_command, sizeof(_command), "%s\n", command);
-	fd_set rfds;
-	FD_ZERO(&rfds);
-	do {
-		sockfd = babelhelper_babel_connect(BABEL_PORT);
-		if (sockfd < 0) {
-			fprintf(stderr, "Connecting to babel socket failed. Retrying.\n");
-			usleep(1000000);
-		}
-	} while (sockfd < 0);
-
-	FD_SET(sockfd, &rfds);
-
-	// receive and ignore babel header
-	while (true) {
-		if ( babelhelper_input_pump(ctx, sockfd, NULL, babelhelper_discard_response))
-			break;
-
-		if (select(sockfd +1, &rfds, NULL, NULL, NULL) < 0) {
-			perror("select:");
-		};
-	}
-
-	// query babel data
-	if ( babelhelper_sendcommand(ctx, sockfd, _command) != strlen(_command) ) {
-		fprintf(stderr, "Retrying to send dump-command to babel socket.\n");
-		goto cleanup;
-	}
-
-	FD_ZERO(&rfds);
-	FD_SET(sockfd, &rfds);
-
-	// receive result
-	while (true) {
-		if ( babelhelper_input_pump(ctx, sockfd, object, lineprocessor))
-			break;
-
-		if (select(sockfd +1, &rfds, NULL, NULL, NULL) < 0) {
-			perror("select:");
-			goto cleanup;
-		};
-	}
-
-cleanup:
-	close(sockfd);
-	return;
-}
-
-/**
- * convert a ipv6 link local address to mac address
- * @dest: buffer to store the resulting mac as string (18 bytes including the terminating \0)
- * @linklocal_ip6: \0 terminated string of the ipv6 address
+/* Keyword lookup tables
  *
- * Return: true on success
- */
-bool babelhelper_ll_to_mac(char *dest, const char* linklocal_ip6) {
-	if (!linklocal_ip6)
-		return false;
+ * Must be ordered lexicographcally (with regard to strcmp),
+ * as we use binary search for lookup */
 
-	struct in6_addr ll_addr = {};
-	unsigned char mac[6];
+struct babel_keyword {
+	ssize_t index;
+	const char *keyword;
+};
 
-	// parse the ip6
-	if (!inet_pton(AF_INET6, linklocal_ip6, &ll_addr))
-		return false;
+const struct babel_keyword event_keywords[] = {
+	{ BABEL_EVENT_ADD, "add" },
+	{ BABEL_EVENT_CHANGE, "change" },
+	{ BABEL_EVENT_FLUSH, "flush" },
+};
 
-	mac[0] = ll_addr.s6_addr[ 8] ^ (1 << 1);
-	mac[1] = ll_addr.s6_addr[ 9];
-	mac[2] = ll_addr.s6_addr[10];
-	mac[3] = ll_addr.s6_addr[13];
-	mac[4] = ll_addr.s6_addr[14];
-	mac[5] = ll_addr.s6_addr[15];
+const struct babel_keyword object_keywords[] = {
+	{ BABEL_OBJECT_INTERFACE, "interface" },
+	{ BABEL_OBJECT_NEIGHBOUR, "neighbour" },
+	{ BABEL_OBJECT_ROUTE, "route" },
+	{ BABEL_OBJECT_XROUTE, "xroute" },
+};
 
-	snprintf(dest, 18, "%02x:%02x:%02x:%02x:%02x:%02x",
-			mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-	return true;
+const struct babel_keyword param_keywords[] = {
+	{ BABEL_PARAM_ADDRESS, "address" }, { BABEL_PARAM_COST, "cost" },     { BABEL_PARAM_FROM, "from" },
+	{ BABEL_PARAM_ID, "id" },           { BABEL_PARAM_IF, "if" },         { BABEL_PARAM_INSTALLED, "installed" },
+	{ BABEL_PARAM_IPV4, "ipv4" },       { BABEL_PARAM_IPV6, "ipv6" },     { BABEL_PARAM_METRIC, "metric" },
+	{ BABEL_PARAM_PREFIX, "prefix" },   { BABEL_PARAM_REACH, "reach" },   { BABEL_PARAM_REFMETRIC, "refmetric" },
+	{ BABEL_PARAM_RXCOST, "rxcost" },   { BABEL_PARAM_TXCOST, "txcost" }, { BABEL_PARAM_UP, "up" },
+	{ BABEL_PARAM_UREACH, "ureach" },   { BABEL_PARAM_VIA, "via" },
+};
+
+static int babel_keyword_cmp(const void *a, const void *b) {
+	const struct babel_keyword *ka = a, *kb = b;
+	return strcmp(ka->keyword, kb->keyword);
 }
 
+static ssize_t babel_lookup(const char *keyword, const struct babel_keyword *entries, size_t n_entries) {
+	const struct babel_keyword key = { 0, keyword };
+
+	const struct babel_keyword *entry = bsearch(&key, entries, n_entries, sizeof(key), babel_keyword_cmp);
+	if (!entry)
+		return -1;
+
+	return entry->index;
+}
+
+static inline babel_event_type_t babel_lookup_event_type(const char *keyword) {
+	return babel_lookup(keyword, event_keywords, BABEL_ARRAY_SIZE(event_keywords));
+}
+
+static inline babel_object_type_t babel_lookup_object_type(const char *keyword) {
+	return babel_lookup(keyword, object_keywords, BABEL_ARRAY_SIZE(object_keywords));
+}
+
+static inline babel_param_type_t babel_lookup_param_type(const char *keyword) {
+	return babel_lookup(keyword, param_keywords, BABEL_ARRAY_SIZE(param_keywords));
+}
+
+
+static inline bool babel_is_ok(const char *str) {
+	return strcmp(str, "ok") == 0;
+}
+
+babel_ctx_t *babel_open(int port) {
+	const struct sockaddr_in6 addr = { .sin6_family = AF_INET6,
+					   .sin6_addr = IN6ADDR_LOOPBACK_INIT,
+					   .sin6_port = htons(port) };
+	int fd, errno_safe;
+	babel_ctx_t *babel;
+	const char *line;
+
+	babel = calloc(1, sizeof(*babel));
+	if (!babel)
+		return NULL;
+
+	fd = socket(AF_INET6, SOCK_STREAM, 0);
+	if (fd < 0)
+		goto err;
+
+	if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) < 0)
+		goto err;
+
+	/* Using the same FILE for reading from and writing to the same socket
+	 * is tricky to get right, so we only use it for read buffering */
+	babel->stream = fdopen(fd, "r");
+	if (!babel->stream)
+		goto err;
+
+	/* Closing the stream will close the fd - set fd to -1 to avoid closing it twice on errors */
+	fd = -1;
+
+	do {
+		line = babel_read_line(babel);
+		if (!line)
+			goto err;
+	} while (!babel_is_ok(line));
+
+	return babel;
+
+err:
+	errno_safe = errno;
+	if (fd >= 0)
+		close(fd);
+	babel_close(babel);
+	errno = errno_safe;
+	return NULL;
+}
+
+void babel_close(babel_ctx_t *babel) {
+	if (babel->stream)
+		fclose(babel->stream);
+	free(babel->line);
+	free(babel);
+}
+
+int babel_write_line(babel_ctx_t *babel, const char *str) {
+	return dprintf(fileno(babel->stream), "%s\n", str);
+}
+
+const char *babel_read_line(babel_ctx_t *babel) {
+	ssize_t len = getline(&babel->line, &babel->n, babel->stream);
+	if (len < 0)
+		return NULL;
+
+	if (len > 0 && babel->line[len - 1] == '\n')
+		babel->line[len - 1] = 0;
+
+	return babel->line;
+}
+
+int babel_read_event_(babel_ctx_t *babel, babel_event_t *event, size_t n_params) {
+	char *tok, *saveptr = NULL;
+	size_t i;
+
+	if (!babel_read_line(babel))
+		return BABEL_ERR;
+
+	if (babel_is_ok(babel->line))
+		return BABEL_OK;
+
+	event->type = BABEL_EVENT_UNKNOWN;
+	event->object_type = BABEL_OBJECT_UNKNOWN;
+	event->object = NULL;
+	for (i = 0; i < n_params; i++)
+		event->params[i] = NULL;
+
+	tok = strtok_r(babel->line, " ", &saveptr);
+	if (!tok)
+		goto end;
+	event->type = babel_lookup_event_type(tok);
+
+	tok = strtok_r(NULL, " ", &saveptr);
+	if (!tok)
+		goto end;
+	event->object_type = babel_lookup_object_type(tok);
+
+	tok = strtok_r(NULL, " ", &saveptr);
+	if (!tok)
+		goto end;
+	event->object = tok;
+
+	while ((tok = strtok_r(NULL, " ", &saveptr))) {
+		size_t index = babel_lookup_param_type(tok);
+
+		tok = strtok_r(NULL, " ", &saveptr);
+		if (!tok)
+			break;
+
+		if (index >= 0 && index < n_params)
+			event->params[index] = tok;
+	}
+
+end:
+	return BABEL_CONTINUE;
+}
