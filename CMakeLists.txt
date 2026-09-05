@@ -5,7 +5,7 @@ set(PROJECT_VERSION 2)
 
 set(LIBDIR "lib${LIB_SUFFIX}")
 
-option(BUILD_SHARED_LIBS "Build shared library")
+option(BUILD_SHARED_LIBS "Build shared library" ON)
 add_compile_definitions("_POSIX_C_SOURCE=200809L")
 add_compile_options("-Wall")
 
